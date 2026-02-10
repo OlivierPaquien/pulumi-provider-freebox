@@ -24,16 +24,10 @@ type GetApiVersionResult struct {
 }
 
 func (GetApiVersion) Annotate(a infer.Annotator) {
-	a.Describe(&GetApiVersion{}, "Discovery of the Freebox over HTTP(S).")
-	r := &GetApiVersionResult{}
-	a.Describe(&r.UID, "Device unique id.")
-	a.Describe(&r.APIVersion, "Current API version on the Freebox.")
-	a.Describe(&r.APIDomain, "Domain to use in place of hardcoded Freebox IP.")
-	a.Describe(&r.APIBaseURL, "API root path on the HTTP server.")
-	a.Describe(&r.BoxModel, "Box model.")
-	a.Describe(&r.BoxModelName, "Box model display name.")
-	a.Describe(&r.HTTPSPort, "Port for remote HTTPS access.")
-	a.Describe(&r.HTTPSAvailable, "Whether HTTPS is configured.")
+	// GetApiVersion est une struct vide ; l'Annotator reçoit ce type, pas GetApiVersionResult.
+	// Tout appel à Describe (sur le type ou sur des champs du résultat) déclenche un panic
+	// (reflect.Value.Addr of unaddressable value). Ne pas appeler Describe.
+	a.SetToken("api", "Version")
 }
 
 func (GetApiVersion) Invoke(ctx context.Context, req infer.FunctionRequest[GetApiVersionArgs]) (infer.FunctionResponse[GetApiVersionResult], error) {
@@ -76,13 +70,9 @@ type GetVirtualDiskResult struct {
 }
 
 func (GetVirtualDisk) Annotate(a infer.Annotator) {
-	a.Describe(&GetVirtualDisk{}, "Get information about a virtual disk.")
-	args := &GetVirtualDiskArgs{}
-	a.Describe(&args.Path, "Path to the virtual disk.")
-	res := &GetVirtualDiskResult{}
-	a.Describe(&res.Type, "Type of virtual disk.")
-	a.Describe(&res.ActualSize, "Space in bytes used on disk.")
-	a.Describe(&res.VirtualSize, "Size in bytes as seen inside the VM.")
+	// GetVirtualDisk est une struct vide ; l'Annotator reçoit ce type. Ne pas appeler Describe
+	// pour éviter le panic "reflect.Value.Addr of unaddressable value".
+	a.SetToken("virtual", "getVirtualDisk")
 }
 
 func (GetVirtualDisk) Invoke(ctx context.Context, req infer.FunctionRequest[GetVirtualDiskArgs]) (infer.FunctionResponse[GetVirtualDiskResult], error) {

@@ -26,13 +26,18 @@ type RemoteFileState struct {
 	SizeOnDisk int64 `pulumi:"sizeOnDisk"`
 }
 
-func (RemoteFile) Annotate(a infer.Annotator) {
-	a.Describe(&RemoteFile{}, "Downloads a file from a URL and stores it on the Freebox.")
-	args := &RemoteFileArgs{}
+func (args *RemoteFileArgs) Annotate(a infer.Annotator) {
 	a.Describe(&args.SourceURL, "URL of the file to download.")
 	a.Describe(&args.DestinationPath, "Path on the Freebox where the file will be stored.")
-	st := &RemoteFileState{}
+}
+
+func (st *RemoteFileState) Annotate(a infer.Annotator) {
 	a.Describe(&st.SizeOnDisk, "Size in bytes of the file on disk.")
+}
+
+func (RemoteFile) Annotate(a infer.Annotator) {
+	// RemoteFile est une struct vide ; l'Annotator reçoit ce type uniquement. Ne pas appeler Describe.
+	a.SetToken("downloads", "File")
 }
 
 func (RemoteFile) Create(ctx context.Context, req infer.CreateRequest[RemoteFileArgs]) (infer.CreateResponse[RemoteFileState], error) {
@@ -52,9 +57,17 @@ func (RemoteFile) Create(ctx context.Context, req infer.CreateRequest[RemoteFile
 		}, nil
 	}
 
-	_, err = cli.GetFileInfo(ctx, dest)
+	info, err := cli.GetFileInfo(ctx, dest)
 	if err == nil {
-		return infer.CreateResponse[RemoteFileState]{}, fmt.Errorf("file already exists at %s", dest)
+		// Fichier déjà présent (ex. après changement de token ou import) : adopter l'existant
+		state := RemoteFileState{
+			RemoteFileArgs: req.Inputs,
+			SizeOnDisk:     int64(info.SizeBytes),
+		}
+		return infer.CreateResponse[RemoteFileState]{
+			ID:     dest,
+			Output: state,
+		}, nil
 	}
 	if err != nil && !errors.Is(err, client.ErrPathNotFound) {
 		return infer.CreateResponse[RemoteFileState]{}, fmt.Errorf("check file: %w", err)
@@ -80,7 +93,7 @@ func (RemoteFile) Create(ctx context.Context, req infer.CreateRequest[RemoteFile
 	}
 	_ = stopAndDeleteDownloadTask(ctx, cli, taskID)
 
-	info, err := cli.GetFileInfo(ctx, dest)
+	info, err = cli.GetFileInfo(ctx, dest)
 	if err != nil {
 		return infer.CreateResponse[RemoteFileState]{}, fmt.Errorf("get file info: %w", err)
 	}
@@ -116,20 +129,28 @@ func (RemoteFile) Read(ctx context.Context, req infer.ReadRequest[RemoteFileArgs
 	return infer.ReadResponse[RemoteFileArgs, RemoteFileState]{State: state}, nil
 }
 
-func (RemoteFile) Delete(ctx context.Context, req infer.DeleteRequest[RemoteFileState]) error {
+func (RemoteFile) Delete(ctx context.Context, req infer.DeleteRequest[RemoteFileState]) (infer.DeleteResponse, error) {
+	freeboxLog("[freebox] RemoteFile Delete: destinationPath=%q\n", req.State.DestinationPath)
 	cli, err := getFreeboxClient(ctx)
 	if err != nil {
-		return err
+		return infer.DeleteResponse{}, err
 	}
 	task, err := cli.RemoveFiles(ctx, []string{req.State.DestinationPath})
 	if err != nil {
-		return err
+		return infer.DeleteResponse{}, fmt.Errorf("remove files: %w", err)
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	_ = waitFileSystemTask(waitCtx, cli, task.ID)
-	_ = stopAndDeleteFileSystemTask(ctx, cli, task.ID)
-	return nil
+	if err := waitFileSystemTask(waitCtx, cli, task.ID); err != nil {
+		freeboxLog("[freebox] RemoteFile Delete path=%q: %v\n", req.State.DestinationPath, err)
+		return infer.DeleteResponse{}, fmt.Errorf("wait for file removal: %w", err)
+	}
+	if err := stopAndDeleteFileSystemTask(ctx, cli, task.ID); err != nil {
+		freeboxLog("[freebox] RemoteFile Delete path=%q: %v\n", req.State.DestinationPath, err)
+		return infer.DeleteResponse{}, fmt.Errorf("stop/delete fs task: %w", err)
+	}
+	freeboxLog("[freebox] RemoteFile Delete path=%q: success\n", req.State.DestinationPath)
+	return infer.DeleteResponse{}, nil
 }
 
 func waitDownloadTask(ctx context.Context, c client.Client, taskID int64) error {

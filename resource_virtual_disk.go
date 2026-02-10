@@ -27,14 +27,20 @@ type VirtualDiskState struct {
 	SizeOnDisk int64  `pulumi:"sizeOnDisk"`
 }
 
-func (VirtualDisk) Annotate(a infer.Annotator) {
-	a.Describe(&VirtualDisk{}, "Manages a virtual disk image within a Freebox.")
-	args := &VirtualDiskArgs{}
+func (args *VirtualDiskArgs) Annotate(a infer.Annotator) {
 	a.Describe(&args.Path, "Path to the virtual disk on the Freebox.")
 	a.Describe(&args.Type, "Type of virtual disk (qcow2 or raw). Defaults to qcow2.")
 	a.Describe(&args.VirtualSize, "Size in bytes of the virtual disk (as seen inside the VM).")
-	st := &VirtualDiskState{}
+}
+
+func (st *VirtualDiskState) Annotate(a infer.Annotator) {
+	a.Describe(&st.Type, "Type of virtual disk.")
 	a.Describe(&st.SizeOnDisk, "Space in bytes used on disk.")
+}
+
+func (VirtualDisk) Annotate(a infer.Annotator) {
+	// VirtualDisk est une struct vide ; l'Annotator reçoit ce type uniquement. Ne pas appeler Describe.
+	a.SetToken("virtual", "Disk")
 }
 
 func (VirtualDisk) Create(ctx context.Context, req infer.CreateRequest[VirtualDiskArgs]) (infer.CreateResponse[VirtualDiskState], error) {
@@ -122,20 +128,20 @@ func (VirtualDisk) Read(ctx context.Context, req infer.ReadRequest[VirtualDiskAr
 	return infer.ReadResponse[VirtualDiskArgs, VirtualDiskState]{State: state}, nil
 }
 
-func (VirtualDisk) Delete(ctx context.Context, req infer.DeleteRequest[VirtualDiskState]) error {
+func (VirtualDisk) Delete(ctx context.Context, req infer.DeleteRequest[VirtualDiskState]) (infer.DeleteResponse, error) {
 	cli, err := getFreeboxClient(ctx)
 	if err != nil {
-		return err
+		return infer.DeleteResponse{}, err
 	}
 	task, err := cli.RemoveFiles(ctx, []string{req.State.Path})
 	if err != nil {
-		return err
+		return infer.DeleteResponse{}, err
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	_ = waitFileSystemTask(waitCtx, cli, task.ID)
 	_ = stopAndDeleteFileSystemTask(ctx, cli, task.ID)
-	return nil
+	return infer.DeleteResponse{}, nil
 }
 
 func waitVirtualDiskTask(ctx context.Context, c client.Client, taskID int64) error {

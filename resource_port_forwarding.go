@@ -27,13 +27,11 @@ type PortForwardingArgs struct {
 
 type PortForwardingState struct {
 	PortForwardingArgs
-	ID       int64  `pulumi:"id"`
+	ID       int64  `pulumi:"ruleId"` // id réservé par Pulumi
 	Hostname string `pulumi:"hostname"`
 }
 
-func (PortForwarding) Annotate(a infer.Annotator) {
-	a.Describe(&PortForwarding{}, "Manages a port forwarding rule between a local host and the Freebox Internet Gateway.")
-	args := &PortForwardingArgs{}
+func (args *PortForwardingArgs) Annotate(a infer.Annotator) {
 	a.Describe(&args.Enabled, "Whether the forwarding is enabled.")
 	a.Describe(&args.IPProtocol, "Protocol: tcp or udp.")
 	a.Describe(&args.PortRangeStart, "Start of the WAN port range (inclusive).")
@@ -42,6 +40,17 @@ func (PortForwarding) Annotate(a infer.Annotator) {
 	a.Describe(&args.SourceIP, "Source IP filter (0.0.0.0 = any).")
 	a.Describe(&args.TargetIP, "Local IP of the port forwarding target.")
 	a.Describe(&args.Comment, "Optional comment for the rule.")
+}
+
+func (st *PortForwardingState) Annotate(a infer.Annotator) {
+	a.Describe(&st.ID, "Freebox API rule ID.")
+	a.Describe(&st.Hostname, "Hostname reported by the Freebox for this rule.")
+}
+
+func (PortForwarding) Annotate(a infer.Annotator) {
+	a.SetToken("fw", "PortForwarding")
+	// PortForwarding est une struct vide ; l'Annotator reçoit ce type uniquement.
+	// Tout Describe (ressource, args ou state) provoque "reflect.Value.Addr of unaddressable value".
 }
 
 func (PortForwarding) Create(ctx context.Context, req infer.CreateRequest[PortForwardingArgs]) (infer.CreateResponse[PortForwardingState], error) {
@@ -186,13 +195,20 @@ func (PortForwarding) Update(ctx context.Context, req infer.UpdateRequest[PortFo
 	return infer.UpdateResponse[PortForwardingState]{Output: state}, nil
 }
 
-func (PortForwarding) Delete(ctx context.Context, req infer.DeleteRequest[PortForwardingState]) error {
+func (PortForwarding) Delete(ctx context.Context, req infer.DeleteRequest[PortForwardingState]) (infer.DeleteResponse, error) {
+	freeboxLog("[freebox] PortForwarding Delete: ruleId=%d\n", req.State.ID)
 	cli, err := getFreeboxClient(ctx)
 	if err != nil {
-		return err
+		return infer.DeleteResponse{}, err
 	}
 	id := req.State.ID
-	return cli.DeletePortForwardingRule(ctx, id)
+	err = cli.DeletePortForwardingRule(ctx, id)
+	if err != nil {
+		freeboxLog("[freebox] PortForwarding Delete ruleId=%d: %v\n", req.State.ID, err)
+		return infer.DeleteResponse{}, err
+	}
+	freeboxLog("[freebox] PortForwarding Delete ruleId=%d: success\n", req.State.ID)
+	return infer.DeleteResponse{}, nil
 }
 
 func int64Ptr(i int64) *int64 { return &i }

@@ -45,16 +45,14 @@ type NetworkingBind struct {
 
 type VirtualMachineState struct {
 	VirtualMachineArgs
-	ID         int64            `pulumi:"id"`
+	ID         int64            `pulumi:"vmId"` // id réservé par Pulumi
 	Mac        string           `pulumi:"mac"`
 	Status     string           `pulumi:"status"`
 	Networking []NetworkingBind `pulumi:"networking,optional"`
 	Ipv4       string           `pulumi:"ipv4,optional"` // First IPv4 (convenience, same as networking[0].ipv4)
 }
 
-func (VirtualMachine) Annotate(a infer.Annotator) {
-	a.Describe(&VirtualMachine{}, "Manages a virtual machine on the Freebox.")
-	args := &VirtualMachineArgs{}
+func (args *VirtualMachineArgs) Annotate(a infer.Annotator) {
 	a.Describe(&args.Name, "Name of the VM.")
 	a.Describe(&args.DiskPath, "Path to the disk image.")
 	a.Describe(&args.DiskType, "Disk type: qcow2 or raw.")
@@ -68,9 +66,19 @@ func (VirtualMachine) Annotate(a infer.Annotator) {
 	a.Describe(&args.CloudInitUserData, "Cloud-init user-data.")
 	a.Describe(&args.CloudInitHostname, "Cloud-init hostname.")
 	a.Describe(&args.BindUSBPorts, "USB ports to bind.")
-	st := &VirtualMachineState{}
-	a.Describe(&st.Ipv4, "First IPv4 address of the VM on the LAN (when running).")
+}
+
+func (st *VirtualMachineState) Annotate(a infer.Annotator) {
+	a.Describe(&st.ID, "Freebox API VM ID.")
+	a.Describe(&st.Mac, "MAC address of the VM.")
+	a.Describe(&st.Status, "Current VM status (running/stopped).")
 	a.Describe(&st.Networking, "Network binds (interface, IPv4, IPv6) for the VM.")
+	a.Describe(&st.Ipv4, "First IPv4 address of the VM on the LAN (when running).")
+}
+
+func (VirtualMachine) Annotate(a infer.Annotator) {
+	// VirtualMachine est une struct vide ; l'Annotator reçoit ce type uniquement. Ne pas appeler Describe.
+	a.SetToken("virtual", "Machine")
 }
 
 func toPayload(in VirtualMachineArgs) freeboxTypes.VirtualMachinePayload {
@@ -233,16 +241,24 @@ func (VirtualMachine) Update(ctx context.Context, req infer.UpdateRequest[Virtua
 	return infer.UpdateResponse[VirtualMachineState]{Output: state}, nil
 }
 
-func (VirtualMachine) Delete(ctx context.Context, req infer.DeleteRequest[VirtualMachineState]) error {
+func (VirtualMachine) Delete(ctx context.Context, req infer.DeleteRequest[VirtualMachineState]) (infer.DeleteResponse, error) {
+	vmId := req.State.ID
+	freeboxLog("[freebox] VirtualMachine Delete: vmId=%d\n", vmId)
 	cli, err := getFreeboxClient(ctx)
 	if err != nil {
-		return err
+		return infer.DeleteResponse{}, err
 	}
 	killTimeout := 30 * time.Second
 	if req.State.Status != freeboxTypes.StoppedStatus {
-		_, _ = vmStop(ctx, cli, req.State.ID, killTimeout)
+		_, _ = vmStop(ctx, cli, vmId, killTimeout)
 	}
-	return cli.DeleteVirtualMachine(ctx, req.State.ID)
+	err = cli.DeleteVirtualMachine(ctx, vmId)
+	if err != nil {
+		freeboxLog("[freebox] VirtualMachine Delete vmId=%d: %v\n", vmId, err)
+		return infer.DeleteResponse{}, err
+	}
+	freeboxLog("[freebox] VirtualMachine Delete vmId=%d: success\n", vmId)
+	return infer.DeleteResponse{}, nil
 }
 
 func vmStart(ctx context.Context, c client.Client, id int64) (string, error) {

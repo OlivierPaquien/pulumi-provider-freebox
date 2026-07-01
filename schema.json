@@ -1,0 +1,1442 @@
+{
+  "name": "freebox",
+  "displayName": "Freebox",
+  "description": "A Pulumi provider for Freebox (port forwarding, VMs, VPN, LAN, DHCP, virtual disks, remote files).",
+  "language": {
+    "csharp": {
+      "respectSchemaVersion": true
+    },
+    "go": {
+      "generateResourceContainerTypes": true,
+      "importBasePath": "github.com/OlivierPaquien/pulumi-provider-freebox/sdk/go/freebox",
+      "respectSchemaVersion": true
+    },
+    "nodejs": {
+      "respectSchemaVersion": true,
+      "packageName": "pulumi-freebox"
+    },
+    "python": {
+      "pyproject": {
+        "enabled": true
+      },
+      "respectSchemaVersion": true,
+      "packageName": "pulumi_freebox"
+    }
+  },
+  "config": {
+    "variables": {
+      "apiVersion": {
+        "type": "string",
+        "description": "The version of the API to use (default: latest)."
+      },
+      "appId": {
+        "type": "string",
+        "description": "The ID of the application for Freebox API authentication.",
+        "secret": true
+      },
+      "endpoint": {
+        "type": "string",
+        "description": "The address of the Freebox (default: http://mafreebox.freebox.fr)."
+      },
+      "token": {
+        "type": "string",
+        "description": "The private token for Freebox API authentication.",
+        "secret": true
+      }
+    },
+    "defaults": [
+      "appId",
+      "token"
+    ]
+  },
+  "types": {
+    "freebox:index:DhcpLeaseInfo": {
+      "properties": {
+        "comment": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "ip": {
+          "type": "string"
+        },
+        "leaseId": {
+          "type": "string"
+        },
+        "mac": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "leaseId",
+        "mac",
+        "ip",
+        "hostname",
+        "comment"
+      ]
+    },
+    "freebox:index:LanHost": {
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "defaultName": {
+          "type": "string"
+        },
+        "firstActivitySeconds": {
+          "type": "number"
+        },
+        "hostId": {
+          "type": "string"
+        },
+        "hostType": {
+          "type": "string"
+        },
+        "interface": {
+          "type": "string"
+        },
+        "l2ident": {
+          "$ref": "#/types/freebox:index:LanHostL2Ident"
+        },
+        "l3connectivities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/freebox:index:LanHostL3Connectivity"
+          }
+        },
+        "names": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/freebox:index:LanHostName"
+          }
+        },
+        "networkControl": {
+          "$ref": "#/types/freebox:index:LanHostNetworkControl"
+        },
+        "persistent": {
+          "type": "boolean"
+        },
+        "primaryName": {
+          "type": "string"
+        },
+        "primaryNameManual": {
+          "type": "boolean"
+        },
+        "reachable": {
+          "type": "boolean"
+        },
+        "vendorName": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "hostId",
+        "active",
+        "reachable",
+        "persistent",
+        "primaryNameManual",
+        "vendorName",
+        "hostType",
+        "interface",
+        "primaryName",
+        "defaultName",
+        "l2ident",
+        "l3connectivities",
+        "names"
+      ]
+    },
+    "freebox:index:LanHostL2Ident": {
+      "properties": {
+        "l2Id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "l2Id",
+        "type"
+      ]
+    },
+    "freebox:index:LanHostL3Connectivity": {
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "address": {
+          "type": "string"
+        },
+        "reachable": {
+          "type": "boolean"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "address",
+        "active",
+        "reachable",
+        "type"
+      ]
+    },
+    "freebox:index:LanHostName": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "name",
+        "source"
+      ]
+    },
+    "freebox:index:LanHostNetworkControl": {
+      "properties": {
+        "currentMode": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "profileId": {
+          "type": "integer"
+        }
+      },
+      "type": "object",
+      "required": [
+        "profileId",
+        "name",
+        "currentMode"
+      ]
+    },
+    "freebox:index:LanInterfaceHostRef": {
+      "properties": {
+        "hostId": {
+          "type": "string"
+        },
+        "interface": {
+          "type": "string"
+        },
+        "l2ident": {
+          "$ref": "#/types/freebox:index:LanHostL2Ident"
+        }
+      },
+      "type": "object",
+      "required": [
+        "interface",
+        "hostId",
+        "l2ident"
+      ]
+    },
+    "freebox:index:LanInterfaceInfo": {
+      "properties": {
+        "hostCount": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "name",
+        "hostCount"
+      ]
+    },
+    "freebox:index:NetworkingBind": {
+      "properties": {
+        "interface": {
+          "type": "string"
+        },
+        "ipv4": {
+          "type": "string"
+        },
+        "ipv6": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "type": "object",
+      "required": [
+        "interface",
+        "ipv4"
+      ]
+    },
+    "freebox:index:PollingSpec": {
+      "properties": {
+        "interval": {
+          "type": "integer"
+        },
+        "timeout": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "freebox:index:RemoteFileAuthentication": {
+      "properties": {
+        "basicAuth": {
+          "$ref": "#/types/freebox:index:RemoteFileBasicAuth"
+        }
+      },
+      "type": "object"
+    },
+    "freebox:index:RemoteFileBasicAuth": {
+      "properties": {
+        "password": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "freebox:index:RemoteFileExtract": {
+      "properties": {
+        "destinationPath": {
+          "type": "string"
+        },
+        "overwrite": {
+          "type": "boolean"
+        },
+        "password": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "freebox:index:RemoteFilePolling": {
+      "properties": {
+        "checksumCompute": {
+          "$ref": "#/types/freebox:index:PollingSpec"
+        },
+        "copy": {
+          "$ref": "#/types/freebox:index:PollingSpec"
+        },
+        "delete": {
+          "$ref": "#/types/freebox:index:PollingSpec"
+        },
+        "download": {
+          "$ref": "#/types/freebox:index:PollingSpec"
+        },
+        "extract": {
+          "$ref": "#/types/freebox:index:PollingSpec"
+        },
+        "move": {
+          "$ref": "#/types/freebox:index:PollingSpec"
+        },
+        "upload": {
+          "$ref": "#/types/freebox:index:PollingSpec"
+        }
+      },
+      "type": "object"
+    },
+    "freebox:index:VirtualDiskPolling": {
+      "properties": {
+        "checksum": {
+          "$ref": "#/types/freebox:index:PollingSpec"
+        },
+        "copy": {
+          "$ref": "#/types/freebox:index:PollingSpec"
+        },
+        "create": {
+          "$ref": "#/types/freebox:index:PollingSpec"
+        },
+        "delete": {
+          "$ref": "#/types/freebox:index:PollingSpec"
+        },
+        "move": {
+          "$ref": "#/types/freebox:index:PollingSpec"
+        },
+        "resize": {
+          "$ref": "#/types/freebox:index:PollingSpec"
+        }
+      },
+      "type": "object"
+    },
+    "freebox:index:VirtualMachinePowerTimeouts": {
+      "properties": {
+        "kill": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "freebox:index:VirtualMachineTimeouts": {
+      "properties": {
+        "create": {
+          "type": "integer"
+        },
+        "delete": {
+          "type": "integer"
+        },
+        "kill": {
+          "type": "integer"
+        },
+        "networking": {
+          "type": "integer"
+        },
+        "read": {
+          "type": "integer"
+        },
+        "update": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "freebox:index:VmDistribution": {
+      "properties": {
+        "hash": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "hash",
+        "os",
+        "url",
+        "name"
+      ]
+    }
+  },
+  "provider": {
+    "description": "Configuration for the Freebox provider.",
+    "properties": {
+      "apiVersion": {
+        "type": "string",
+        "description": "The version of the API to use (default: latest)."
+      },
+      "appId": {
+        "type": "string",
+        "description": "The ID of the application for Freebox API authentication.",
+        "secret": true
+      },
+      "endpoint": {
+        "type": "string",
+        "description": "The address of the Freebox (default: http://mafreebox.freebox.fr)."
+      },
+      "token": {
+        "type": "string",
+        "description": "The private token for Freebox API authentication.",
+        "secret": true
+      }
+    },
+    "required": [
+      "appId",
+      "token"
+    ],
+    "inputProperties": {
+      "apiVersion": {
+        "type": "string",
+        "description": "The version of the API to use (default: latest)."
+      },
+      "appId": {
+        "type": "string",
+        "description": "The ID of the application for Freebox API authentication.",
+        "secret": true
+      },
+      "endpoint": {
+        "type": "string",
+        "description": "The address of the Freebox (default: http://mafreebox.freebox.fr)."
+      },
+      "token": {
+        "type": "string",
+        "description": "The private token for Freebox API authentication.",
+        "secret": true
+      }
+    },
+    "requiredInputs": [
+      "appId",
+      "token"
+    ]
+  },
+  "resources": {
+    "freebox:dhcp:StaticLease": {
+      "properties": {
+        "comment": {
+          "type": "string",
+          "description": "Optional comment for the lease."
+        },
+        "hostname": {
+          "type": "string",
+          "description": "Optional hostname for the lease."
+        },
+        "ip": {
+          "type": "string",
+          "description": "IPv4 address to assign to the host."
+        },
+        "mac": {
+          "type": "string",
+          "description": "MAC address of the host (resource identifier)."
+        }
+      },
+      "required": [
+        "mac",
+        "ip"
+      ],
+      "inputProperties": {
+        "comment": {
+          "type": "string",
+          "description": "Optional comment for the lease."
+        },
+        "hostname": {
+          "type": "string",
+          "description": "Optional hostname for the lease."
+        },
+        "ip": {
+          "type": "string",
+          "description": "IPv4 address to assign to the host."
+        },
+        "mac": {
+          "type": "string",
+          "description": "MAC address of the host."
+        }
+      },
+      "requiredInputs": [
+        "mac",
+        "ip"
+      ]
+    },
+    "freebox:downloads:File": {
+      "properties": {
+        "authentication": {
+          "$ref": "#/types/freebox:index:RemoteFileAuthentication"
+        },
+        "checksum": {
+          "type": "string",
+          "description": "Checksum of the file on disk."
+        },
+        "destinationPath": {
+          "type": "string",
+          "description": "Path on the Freebox where the file will be stored."
+        },
+        "extract": {
+          "$ref": "#/types/freebox:index:RemoteFileExtract"
+        },
+        "parents": {
+          "type": "boolean",
+          "description": "Create parent directories if missing."
+        },
+        "polling": {
+          "$ref": "#/types/freebox:index:RemoteFilePolling"
+        },
+        "sizeOnDisk": {
+          "type": "integer",
+          "description": "Size in bytes of the file on disk."
+        },
+        "sourceContent": {
+          "type": "string",
+          "description": "Inline file content to upload."
+        },
+        "sourceLocalFile": {
+          "type": "string",
+          "description": "Path to a local file to upload (relative to the Pulumi engine)."
+        },
+        "sourceRemoteFile": {
+          "type": "string",
+          "description": "Path to an existing file on the Freebox to copy."
+        },
+        "sourceUrl": {
+          "type": "string",
+          "description": "URL of the file to download."
+        }
+      },
+      "required": [
+        "destinationPath",
+        "checksum",
+        "sizeOnDisk"
+      ],
+      "inputProperties": {
+        "authentication": {
+          "$ref": "#/types/freebox:index:RemoteFileAuthentication"
+        },
+        "checksum": {
+          "type": "string",
+          "description": "Expected checksum (method:value). Computed after create if omitted."
+        },
+        "destinationPath": {
+          "type": "string",
+          "description": "Path on the Freebox where the file will be stored."
+        },
+        "extract": {
+          "$ref": "#/types/freebox:index:RemoteFileExtract"
+        },
+        "parents": {
+          "type": "boolean",
+          "description": "Create parent directories if missing."
+        },
+        "polling": {
+          "$ref": "#/types/freebox:index:RemoteFilePolling"
+        },
+        "sourceContent": {
+          "type": "string",
+          "description": "Inline file content to upload."
+        },
+        "sourceLocalFile": {
+          "type": "string",
+          "description": "Path to a local file to upload (relative to the Pulumi engine)."
+        },
+        "sourceRemoteFile": {
+          "type": "string",
+          "description": "Path to an existing file on the Freebox to copy."
+        },
+        "sourceUrl": {
+          "type": "string",
+          "description": "URL of the file to download."
+        }
+      },
+      "requiredInputs": [
+        "destinationPath"
+      ]
+    },
+    "freebox:fw:PortForwarding": {
+      "properties": {
+        "comment": {
+          "type": "string",
+          "description": "Optional comment for the rule."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the forwarding is enabled."
+        },
+        "host": {
+          "$ref": "#/types/freebox:index:LanHost",
+          "description": "LAN host information for the target."
+        },
+        "hostname": {
+          "type": "string",
+          "description": "Hostname reported by the Freebox for this rule."
+        },
+        "ipProtocol": {
+          "type": "string",
+          "description": "Protocol: tcp or udp."
+        },
+        "portRangeEnd": {
+          "type": "integer",
+          "description": "End of the WAN port range (defaults to portRangeStart)."
+        },
+        "portRangeStart": {
+          "type": "integer",
+          "description": "Start of the WAN port range (inclusive)."
+        },
+        "ruleId": {
+          "type": "integer",
+          "description": "Freebox API rule ID."
+        },
+        "sourceIp": {
+          "type": "string",
+          "description": "Source IP filter (0.0.0.0 = any)."
+        },
+        "targetIp": {
+          "type": "string",
+          "description": "Local IP of the port forwarding target."
+        },
+        "targetPort": {
+          "type": "integer",
+          "description": "Target LAN port (defaults to portRangeStart when range is a single port)."
+        }
+      },
+      "required": [
+        "enabled",
+        "ipProtocol",
+        "portRangeStart",
+        "targetIp",
+        "ruleId",
+        "hostname"
+      ],
+      "inputProperties": {
+        "comment": {
+          "type": "string",
+          "description": "Optional comment for the rule."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the forwarding is enabled."
+        },
+        "ipProtocol": {
+          "type": "string",
+          "description": "Protocol: tcp or udp."
+        },
+        "portRangeEnd": {
+          "type": "integer",
+          "description": "End of the WAN port range (defaults to portRangeStart)."
+        },
+        "portRangeStart": {
+          "type": "integer",
+          "description": "Start of the WAN port range (inclusive)."
+        },
+        "sourceIp": {
+          "type": "string",
+          "description": "Source IP filter (0.0.0.0 = any)."
+        },
+        "targetIp": {
+          "type": "string",
+          "description": "Local IP of the port forwarding target."
+        },
+        "targetPort": {
+          "type": "integer",
+          "description": "Target LAN port (defaults to portRangeStart when range is a single port)."
+        }
+      },
+      "requiredInputs": [
+        "enabled",
+        "ipProtocol",
+        "portRangeStart",
+        "targetIp"
+      ]
+    },
+    "freebox:lan:Config": {
+      "properties": {
+        "ip": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nameDns": {
+          "type": "string"
+        },
+        "nameMdns": {
+          "type": "string"
+        },
+        "nameNetbios": {
+          "type": "string"
+        }
+      },
+      "inputProperties": {
+        "ip": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nameDns": {
+          "type": "string"
+        },
+        "nameMdns": {
+          "type": "string"
+        },
+        "nameNetbios": {
+          "type": "string"
+        }
+      }
+    },
+    "freebox:virtual:Disk": {
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the virtual disk on the Freebox."
+        },
+        "polling": {
+          "$ref": "#/types/freebox:index:VirtualDiskPolling"
+        },
+        "resizeFrom": {
+          "type": "string",
+          "description": "Path to an existing disk to copy and resize from."
+        },
+        "resizeFromChecksum": {
+          "type": "string",
+          "description": "SHA512 checksum of resizeFrom source (internal)."
+        },
+        "sizeOnDisk": {
+          "type": "integer",
+          "description": "Space in bytes used on disk."
+        },
+        "type": {
+          "type": "string",
+          "description": "Type of virtual disk."
+        },
+        "virtualSize": {
+          "type": "integer",
+          "description": "Size in bytes of the virtual disk (as seen inside the VM)."
+        }
+      },
+      "required": [
+        "path",
+        "virtualSize",
+        "type",
+        "sizeOnDisk"
+      ],
+      "inputProperties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the virtual disk on the Freebox."
+        },
+        "polling": {
+          "$ref": "#/types/freebox:index:VirtualDiskPolling"
+        },
+        "resizeFrom": {
+          "type": "string",
+          "description": "Path to an existing disk to copy and resize from."
+        },
+        "type": {
+          "type": "string",
+          "description": "Type of virtual disk (qcow2 or raw). Defaults to qcow2."
+        },
+        "virtualSize": {
+          "type": "integer",
+          "description": "Size in bytes of the virtual disk (as seen inside the VM)."
+        }
+      },
+      "requiredInputs": [
+        "path",
+        "virtualSize"
+      ]
+    },
+    "freebox:virtual:Machine": {
+      "properties": {
+        "bindUsbPorts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "USB ports to bind."
+        },
+        "cdPath": {
+          "type": "string",
+          "description": "Path to CD/ISO image."
+        },
+        "cloudinitHostname": {
+          "type": "string",
+          "description": "Cloud-init hostname."
+        },
+        "cloudinitUserdata": {
+          "type": "string",
+          "description": "Cloud-init user-data."
+        },
+        "diskPath": {
+          "type": "string",
+          "description": "Path to the disk image."
+        },
+        "diskType": {
+          "type": "string",
+          "description": "Disk type: qcow2 or raw."
+        },
+        "enableCloudinit": {
+          "type": "boolean",
+          "description": "Enable cloud-init."
+        },
+        "enableScreen": {
+          "type": "boolean",
+          "description": "Enable VNC screen."
+        },
+        "ipv4": {
+          "type": "string",
+          "description": "First IPv4 address of the VM on the LAN (when running)."
+        },
+        "mac": {
+          "type": "string",
+          "description": "MAC address of the VM."
+        },
+        "memory": {
+          "type": "integer",
+          "description": "Memory in MB."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the VM."
+        },
+        "networking": {
+          "type": "array",
+          "items": {
+            "$ref": "#/types/freebox:index:NetworkingBind"
+          },
+          "description": "Network binds (interface, IPv4, IPv6) for the VM."
+        },
+        "os": {
+          "type": "string",
+          "description": "OS type (for icon)."
+        },
+        "status": {
+          "type": "string",
+          "description": "Current VM status (running/stopped)."
+        },
+        "timeouts": {
+          "$ref": "#/types/freebox:index:VirtualMachineTimeouts",
+          "description": "Operation timeouts (create, update, read, delete, kill, networking)."
+        },
+        "vcpus": {
+          "type": "integer",
+          "description": "Number of vCPUs."
+        },
+        "vmId": {
+          "type": "integer",
+          "description": "Freebox API VM ID."
+        }
+      },
+      "required": [
+        "name",
+        "diskPath",
+        "diskType",
+        "memory",
+        "vcpus",
+        "vmId",
+        "mac",
+        "status"
+      ],
+      "inputProperties": {
+        "bindUsbPorts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "USB ports to bind."
+        },
+        "cdPath": {
+          "type": "string",
+          "description": "Path to CD/ISO image."
+        },
+        "cloudinitHostname": {
+          "type": "string",
+          "description": "Cloud-init hostname."
+        },
+        "cloudinitUserdata": {
+          "type": "string",
+          "description": "Cloud-init user-data."
+        },
+        "diskPath": {
+          "type": "string",
+          "description": "Path to the disk image."
+        },
+        "diskType": {
+          "type": "string",
+          "description": "Disk type: qcow2 or raw."
+        },
+        "enableCloudinit": {
+          "type": "boolean",
+          "description": "Enable cloud-init."
+        },
+        "enableScreen": {
+          "type": "boolean",
+          "description": "Enable VNC screen."
+        },
+        "memory": {
+          "type": "integer",
+          "description": "Memory in MB."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the VM."
+        },
+        "os": {
+          "type": "string",
+          "description": "OS type (for icon)."
+        },
+        "status": {
+          "type": "string",
+          "description": "Desired state: running or stopped. Default running."
+        },
+        "timeouts": {
+          "$ref": "#/types/freebox:index:VirtualMachineTimeouts",
+          "description": "Operation timeouts (create, update, read, delete, kill, networking)."
+        },
+        "vcpus": {
+          "type": "integer",
+          "description": "Number of vCPUs."
+        }
+      },
+      "requiredInputs": [
+        "name",
+        "diskPath",
+        "diskType",
+        "memory",
+        "vcpus"
+      ]
+    },
+    "freebox:virtual:MachinePower": {
+      "properties": {
+        "killTimeout": {
+          "type": "integer",
+          "description": "Seconds to wait for graceful shutdown before force kill (default 30). Deprecated: use timeouts.kill."
+        },
+        "powerState": {
+          "type": "string",
+          "description": "Desired power state: running or stopped."
+        },
+        "timeouts": {
+          "$ref": "#/types/freebox:index:VirtualMachinePowerTimeouts",
+          "description": "Timeouts for power operations."
+        },
+        "vmId": {
+          "type": "integer",
+          "description": "Identifier of the virtual machine."
+        }
+      },
+      "required": [
+        "vmId",
+        "powerState"
+      ],
+      "inputProperties": {
+        "killTimeout": {
+          "type": "integer",
+          "description": "Seconds to wait for graceful shutdown before force kill (default 30). Deprecated: use timeouts.kill."
+        },
+        "powerState": {
+          "type": "string",
+          "description": "Desired power state: running or stopped."
+        },
+        "timeouts": {
+          "$ref": "#/types/freebox:index:VirtualMachinePowerTimeouts",
+          "description": "Timeouts for power operations."
+        },
+        "vmId": {
+          "type": "integer",
+          "description": "Identifier of the virtual machine."
+        }
+      },
+      "requiredInputs": [
+        "vmId",
+        "powerState"
+      ]
+    },
+    "freebox:vpn:Server": {
+      "properties": {
+        "ca": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "pushDhcp": {
+          "type": "boolean"
+        },
+        "serverIp": {
+          "type": "string"
+        },
+        "serverMask": {
+          "type": "string"
+        },
+        "serverPort": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ca"
+      ],
+      "inputProperties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "pushDhcp": {
+          "type": "boolean"
+        },
+        "serverIp": {
+          "type": "string"
+        },
+        "serverMask": {
+          "type": "string"
+        },
+        "serverPort": {
+          "type": "integer"
+        }
+      }
+    },
+    "freebox:vpn:User": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "login": {
+          "type": "string"
+        },
+        "ovpnConfig": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "login",
+        "password",
+        "ovpnConfig"
+      ],
+      "inputProperties": {
+        "description": {
+          "type": "string"
+        },
+        "login": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        }
+      },
+      "requiredInputs": [
+        "login",
+        "password"
+      ]
+    }
+  },
+  "functions": {
+    "freebox:api:Version": {
+      "inputs": {
+        "type": "object"
+      },
+      "outputs": {
+        "properties": {
+          "apiBaseUrl": {
+            "type": "string"
+          },
+          "apiDomain": {
+            "type": "string"
+          },
+          "apiVersion": {
+            "type": "string"
+          },
+          "boxModel": {
+            "type": "string"
+          },
+          "boxModelName": {
+            "type": "string"
+          },
+          "httpsAvailable": {
+            "type": "boolean"
+          },
+          "httpsPort": {
+            "type": "integer"
+          },
+          "uid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uid",
+          "apiVersion",
+          "apiDomain",
+          "apiBaseUrl",
+          "boxModelName",
+          "boxModel",
+          "httpsPort",
+          "httpsAvailable"
+        ],
+        "type": "object"
+      }
+    },
+    "freebox:dhcp:getLease": {
+      "inputs": {
+        "properties": {
+          "mac": {
+            "type": "string"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mac"
+        ]
+      },
+      "outputs": {
+        "properties": {
+          "comment": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "leaseId": {
+            "type": "string"
+          },
+          "mac": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "leaseId",
+          "mac",
+          "ip",
+          "hostname",
+          "comment"
+        ],
+        "type": "object"
+      }
+    },
+    "freebox:dhcp:getLeases": {
+      "inputs": {
+        "type": "object"
+      },
+      "outputs": {
+        "properties": {
+          "leases": {
+            "items": {
+              "$ref": "#/types/freebox:index:DhcpLeaseInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "leases"
+        ],
+        "type": "object"
+      }
+    },
+    "freebox:lan:getConfig": {
+      "inputs": {
+        "type": "object"
+      },
+      "outputs": {
+        "properties": {
+          "ip": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "nameDns": {
+            "type": "string"
+          },
+          "nameMdns": {
+            "type": "string"
+          },
+          "nameNetbios": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ip",
+          "name",
+          "nameDns",
+          "nameMdns",
+          "nameNetbios",
+          "mode"
+        ],
+        "type": "object"
+      }
+    },
+    "freebox:lan:getInterfaceHost": {
+      "inputs": {
+        "properties": {
+          "hostId": {
+            "type": "string"
+          },
+          "interface": {
+            "type": "string"
+          }
+        },
+        "type": "object",
+        "required": [
+          "interface",
+          "hostId"
+        ]
+      },
+      "outputs": {
+        "properties": {
+          "hostId": {
+            "type": "string"
+          },
+          "interface": {
+            "type": "string"
+          },
+          "l2ident": {
+            "$ref": "#/types/freebox:index:LanHostL2Ident"
+          }
+        },
+        "required": [
+          "interface",
+          "hostId",
+          "l2ident"
+        ],
+        "type": "object"
+      }
+    },
+    "freebox:lan:getInterfaceHosts": {
+      "inputs": {
+        "properties": {
+          "interface": {
+            "type": "string"
+          }
+        },
+        "type": "object",
+        "required": [
+          "interface"
+        ]
+      },
+      "outputs": {
+        "properties": {
+          "hosts": {
+            "items": {
+              "$ref": "#/types/freebox:index:LanInterfaceHostRef"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "hosts"
+        ],
+        "type": "object"
+      }
+    },
+    "freebox:lan:getInterfaces": {
+      "inputs": {
+        "type": "object"
+      },
+      "outputs": {
+        "properties": {
+          "interfaces": {
+            "items": {
+              "$ref": "#/types/freebox:index:LanInterfaceInfo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "interfaces"
+        ],
+        "type": "object"
+      }
+    },
+    "freebox:system:getInfo": {
+      "inputs": {
+        "type": "object"
+      },
+      "outputs": {
+        "properties": {
+          "boardName": {
+            "type": "string"
+          },
+          "boxAuthenticated": {
+            "type": "boolean"
+          },
+          "fanRpm": {
+            "type": "integer"
+          },
+          "firmwareVersion": {
+            "type": "string"
+          },
+          "mac": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "tempCpub": {
+            "type": "integer"
+          },
+          "tempCpum": {
+            "type": "integer"
+          },
+          "tempSw": {
+            "type": "integer"
+          },
+          "uptime": {
+            "type": "string"
+          },
+          "uptimeVal": {
+            "type": "integer"
+          },
+          "userMainStorage": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "firmwareVersion",
+          "mac",
+          "serial",
+          "uptime",
+          "uptimeVal",
+          "boardName",
+          "tempCpum",
+          "tempSw",
+          "tempCpub",
+          "fanRpm",
+          "boxAuthenticated",
+          "userMainStorage"
+        ],
+        "type": "object"
+      }
+    },
+    "freebox:virtual:getDistributions": {
+      "inputs": {
+        "type": "object"
+      },
+      "outputs": {
+        "properties": {
+          "distributions": {
+            "items": {
+              "$ref": "#/types/freebox:index:VmDistribution"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "distributions"
+        ],
+        "type": "object"
+      }
+    },
+    "freebox:virtual:getVirtualDisk": {
+      "inputs": {
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ]
+      },
+      "outputs": {
+        "properties": {
+          "actualSize": {
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "virtualSize": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "type",
+          "actualSize",
+          "virtualSize"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "pluginDownloadURL": "github://api.github.com/OlivierPaquien/pulumi-provider-freebox",
+  "publisher": "OlivierPaquien",
+  "version": "0.3.1"
+}

@@ -12,6 +12,12 @@ func TestNormalizeMAC(t *testing.T) {
 	assert.Equal(t, "AA:BB:CC:DD:EE:FF", normalizeMAC("aa:bb:cc:dd:ee:ff"))
 }
 
+func TestMacForPreview(t *testing.T) {
+	assert.Equal(t, previewMAC, macForPreview(""))
+	assert.Equal(t, previewMAC, macForPreview("not-a-mac"))
+	assert.Equal(t, "AA:BB:CC:DD:EE:FF", macForPreview("aa:bb:cc:dd:ee:ff"))
+}
+
 func TestDhcpLeaseHostname(t *testing.T) {
 	lease := freeboxTypes.DHCPStaticLeaseInfo{
 		Mac:      "2E:7E:55:60:5A:66",

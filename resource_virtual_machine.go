@@ -170,6 +170,7 @@ func (VirtualMachine) Create(ctx context.Context, req infer.CreateRequest[Virtua
 			ID: "unknown",
 			Output: VirtualMachineState{
 				VirtualMachineArgs: req.Inputs,
+				Mac:                macForPreview(""),
 				Status:             status,
 				Timeouts:           req.Inputs.Timeouts,
 			},
@@ -249,7 +250,7 @@ func (VirtualMachine) Update(ctx context.Context, req infer.UpdateRequest[Virtua
 			Output: VirtualMachineState{
 				VirtualMachineArgs: req.Inputs,
 				ID:                 req.State.ID,
-				Mac:                req.State.Mac,
+				Mac:                macForPreview(req.State.Mac),
 				Status:             desiredStatus,
 				Timeouts:           req.Inputs.Timeouts,
 			},

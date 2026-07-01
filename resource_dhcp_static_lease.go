@@ -38,6 +38,17 @@ func (DHCPStaticLease) Annotate(a infer.Annotator) {
 }
 
 func (DHCPStaticLease) Create(ctx context.Context, req infer.CreateRequest[DHCPStaticLeaseArgs]) (infer.CreateResponse[DHCPStaticLeaseState], error) {
+	if req.DryRun {
+		inputs := req.Inputs
+		inputs.Mac = macForPreview(req.Inputs.Mac)
+		return infer.CreateResponse[DHCPStaticLeaseState]{
+			ID: inputs.Mac,
+			Output: DHCPStaticLeaseState{
+				DHCPStaticLeaseArgs: inputs,
+			},
+		}, nil
+	}
+
 	if err := validateDHCPStaticLeaseArgs(req.Inputs.Mac, req.Inputs.IP); err != nil {
 		return infer.CreateResponse[DHCPStaticLeaseState]{}, err
 	}
@@ -57,15 +68,6 @@ func (DHCPStaticLease) Create(ctx context.Context, req infer.CreateRequest[DHCPS
 	}
 	if req.Inputs.Hostname != "" {
 		payload.Hostname = req.Inputs.Hostname
-	}
-
-	if req.DryRun {
-		return infer.CreateResponse[DHCPStaticLeaseState]{
-			ID: mac,
-			Output: DHCPStaticLeaseState{
-				DHCPStaticLeaseArgs: req.Inputs,
-			},
-		}, nil
 	}
 
 	if err := ensureDHCPStaticLease(ctx, cli, payload); err != nil {
@@ -106,6 +108,14 @@ func (DHCPStaticLease) Read(ctx context.Context, req infer.ReadRequest[DHCPStati
 }
 
 func (DHCPStaticLease) Update(ctx context.Context, req infer.UpdateRequest[DHCPStaticLeaseArgs, DHCPStaticLeaseState]) (infer.UpdateResponse[DHCPStaticLeaseState], error) {
+	if req.DryRun {
+		inputs := req.Inputs
+		inputs.Mac = macForPreview(req.Inputs.Mac)
+		return infer.UpdateResponse[DHCPStaticLeaseState]{
+			Output: DHCPStaticLeaseState{DHCPStaticLeaseArgs: inputs},
+		}, nil
+	}
+
 	if err := validateDHCPStaticLeaseArgs(req.Inputs.Mac, req.Inputs.IP); err != nil {
 		return infer.UpdateResponse[DHCPStaticLeaseState]{}, err
 	}
@@ -125,12 +135,6 @@ func (DHCPStaticLease) Update(ctx context.Context, req infer.UpdateRequest[DHCPS
 	}
 	if req.Inputs.Hostname != "" {
 		payload.Hostname = req.Inputs.Hostname
-	}
-
-	if req.DryRun {
-		return infer.UpdateResponse[DHCPStaticLeaseState]{
-			Output: DHCPStaticLeaseState{DHCPStaticLeaseArgs: req.Inputs},
-		}, nil
 	}
 
 	if err := ensureDHCPStaticLease(ctx, cli, payload); err != nil {

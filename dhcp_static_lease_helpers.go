@@ -10,8 +10,19 @@ import (
 	freeboxTypes "github.com/nikolalohinski/free-go/types"
 )
 
+const previewMAC = "02:00:00:00:00:00"
+
 func normalizeMAC(mac string) string {
 	return strings.ToUpper(mac)
+}
+
+// macForPreview returns a syntactically valid MAC when the real value is not
+// yet known (pulumi preview / dry-run).
+func macForPreview(mac string) string {
+	if isValidMAC(mac) {
+		return normalizeMAC(mac)
+	}
+	return previewMAC
 }
 
 // dhcpLeaseHostname preserves the configured hostname when the API returns the MAC as placeholder.

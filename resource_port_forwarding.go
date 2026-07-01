@@ -27,8 +27,9 @@ type PortForwardingArgs struct {
 
 type PortForwardingState struct {
 	PortForwardingArgs
-	ID       int64  `pulumi:"ruleId"` // id réservé par Pulumi
-	Hostname string `pulumi:"hostname"`
+	ID       int64    `pulumi:"ruleId"` // id réservé par Pulumi
+	Hostname string   `pulumi:"hostname"`
+	Host     *LanHost `pulumi:"host,optional"`
 }
 
 func (args *PortForwardingArgs) Annotate(a infer.Annotator) {
@@ -45,6 +46,7 @@ func (args *PortForwardingArgs) Annotate(a infer.Annotator) {
 func (st *PortForwardingState) Annotate(a infer.Annotator) {
 	a.Describe(&st.ID, "Freebox API rule ID.")
 	a.Describe(&st.Hostname, "Hostname reported by the Freebox for this rule.")
+	a.Describe(&st.Host, "LAN host information for the target.")
 }
 
 func (PortForwarding) Annotate(a infer.Annotator) {
@@ -53,34 +55,67 @@ func (PortForwarding) Annotate(a infer.Annotator) {
 	// Tout Describe (ressource, args ou state) provoque "reflect.Value.Addr of unaddressable value".
 }
 
+func portForwardingPayload(args PortForwardingArgs) freeboxTypes.PortForwardingRulePayload {
+	payload := freeboxTypes.PortForwardingRulePayload{
+		Enabled:      &args.Enabled,
+		IPProtocol:   args.IPProtocol,
+		LanIP:        args.TargetIP,
+		WanPortStart: args.PortRangeStart,
+	}
+	if args.PortRangeEnd != nil {
+		payload.WanPortEnd = *args.PortRangeEnd
+	} else {
+		payload.WanPortEnd = args.PortRangeStart
+	}
+	if args.TargetPort != nil {
+		payload.LanPort = *args.TargetPort
+	} else {
+		payload.LanPort = args.PortRangeStart
+	}
+	if args.SourceIP != "" {
+		payload.SourceIP = args.SourceIP
+	} else {
+		payload.SourceIP = "0.0.0.0"
+	}
+	if args.Comment != "" {
+		payload.Comment = args.Comment
+	}
+	return payload
+}
+
+func portForwardingStateFromRule(args PortForwardingArgs, rule freeboxTypes.PortForwardingRule) PortForwardingState {
+	return PortForwardingState{
+		PortForwardingArgs: args,
+		ID:                 rule.ID,
+		Hostname:           rule.Hostname,
+		Host:               lanHostPtrFromAPI(rule.Host),
+	}
+}
+
+func portForwardingArgsFromRule(rule freeboxTypes.PortForwardingRule) PortForwardingArgs {
+	enabled := false
+	if rule.Enabled != nil {
+		enabled = *rule.Enabled
+	}
+	return PortForwardingArgs{
+		Enabled:        enabled,
+		IPProtocol:     rule.IPProtocol,
+		PortRangeStart: rule.WanPortStart,
+		PortRangeEnd:   int64Ptr(rule.WanPortEnd),
+		TargetPort:     int64Ptr(rule.LanPort),
+		SourceIP:       rule.SourceIP,
+		TargetIP:       rule.LanIP,
+		Comment:        rule.Comment,
+	}
+}
+
 func (PortForwarding) Create(ctx context.Context, req infer.CreateRequest[PortForwardingArgs]) (infer.CreateResponse[PortForwardingState], error) {
 	cli, err := getFreeboxClient(ctx)
 	if err != nil {
 		return infer.CreateResponse[PortForwardingState]{}, err
 	}
 
-	payload := freeboxTypes.PortForwardingRulePayload{
-		Enabled:      &req.Inputs.Enabled,
-		IPProtocol:   req.Inputs.IPProtocol,
-		LanIP:        req.Inputs.TargetIP,
-		WanPortStart: req.Inputs.PortRangeStart,
-	}
-	if req.Inputs.PortRangeEnd != nil {
-		payload.WanPortEnd = *req.Inputs.PortRangeEnd
-	} else {
-		payload.WanPortEnd = req.Inputs.PortRangeStart
-	}
-	if req.Inputs.TargetPort != nil {
-		payload.LanPort = *req.Inputs.TargetPort
-	} else {
-		payload.LanPort = req.Inputs.PortRangeStart
-	}
-	if req.Inputs.SourceIP != "" {
-		payload.SourceIP = req.Inputs.SourceIP
-	}
-	if req.Inputs.Comment != "" {
-		payload.Comment = req.Inputs.Comment
-	}
+	payload := portForwardingPayload(req.Inputs)
 
 	if req.DryRun {
 		return infer.CreateResponse[PortForwardingState]{
@@ -94,11 +129,7 @@ func (PortForwarding) Create(ctx context.Context, req infer.CreateRequest[PortFo
 		return infer.CreateResponse[PortForwardingState]{}, fmt.Errorf("create port forwarding: %w", err)
 	}
 
-	state := PortForwardingState{
-		PortForwardingArgs: req.Inputs,
-		ID:                 rule.ID,
-		Hostname:           rule.Hostname,
-	}
+	state := portForwardingStateFromRule(req.Inputs, rule)
 	return infer.CreateResponse[PortForwardingState]{
 		ID:     strconv.FormatInt(rule.ID, 10),
 		Output: state,
@@ -118,31 +149,17 @@ func (PortForwarding) Read(ctx context.Context, req infer.ReadRequest[PortForwar
 
 	rule, err := cli.GetPortForwardingRule(ctx, id)
 	if err != nil {
+		if errors.Is(err, client.ErrPortForwardingRuleNotFound) {
+			return infer.ReadResponse[PortForwardingArgs, PortForwardingState]{}, nil
+		}
 		var apiErr *client.APIError
-		if errors.As(err, &apiErr) && (apiErr.Code == "not_found" || apiErr.Code == "invalid_request") {
+		if errors.As(err, &apiErr) && (apiErr.Code == "not_found" || apiErr.Code == "invalid_request" || apiErr.Code == "noent") {
 			return infer.ReadResponse[PortForwardingArgs, PortForwardingState]{}, nil
 		}
 		return infer.ReadResponse[PortForwardingArgs, PortForwardingState]{}, fmt.Errorf("get port forwarding: %w", err)
 	}
 
-	enabled := false
-	if rule.Enabled != nil {
-		enabled = *rule.Enabled
-	}
-	state := PortForwardingState{
-		PortForwardingArgs: PortForwardingArgs{
-			Enabled:        enabled,
-			IPProtocol:     rule.IPProtocol,
-			PortRangeStart: rule.WanPortStart,
-			PortRangeEnd:   int64Ptr(rule.WanPortEnd),
-			TargetPort:     int64Ptr(rule.LanPort),
-			SourceIP:       rule.SourceIP,
-			TargetIP:       rule.LanIP,
-			Comment:        rule.Comment,
-		},
-		ID:       rule.ID,
-		Hostname: rule.Hostname,
-	}
+	state := portForwardingStateFromRule(portForwardingArgsFromRule(rule), rule)
 	return infer.ReadResponse[PortForwardingArgs, PortForwardingState]{State: state}, nil
 }
 
@@ -153,28 +170,7 @@ func (PortForwarding) Update(ctx context.Context, req infer.UpdateRequest[PortFo
 	}
 
 	id := req.State.ID
-	payload := freeboxTypes.PortForwardingRulePayload{
-		Enabled:      &req.Inputs.Enabled,
-		IPProtocol:   req.Inputs.IPProtocol,
-		LanIP:        req.Inputs.TargetIP,
-		WanPortStart: req.Inputs.PortRangeStart,
-	}
-	if req.Inputs.PortRangeEnd != nil {
-		payload.WanPortEnd = *req.Inputs.PortRangeEnd
-	} else {
-		payload.WanPortEnd = req.Inputs.PortRangeStart
-	}
-	if req.Inputs.TargetPort != nil {
-		payload.LanPort = *req.Inputs.TargetPort
-	} else {
-		payload.LanPort = req.Inputs.PortRangeStart
-	}
-	if req.Inputs.SourceIP != "" {
-		payload.SourceIP = req.Inputs.SourceIP
-	}
-	if req.Inputs.Comment != "" {
-		payload.Comment = req.Inputs.Comment
-	}
+	payload := portForwardingPayload(req.Inputs)
 
 	if req.DryRun {
 		return infer.UpdateResponse[PortForwardingState]{
@@ -187,11 +183,7 @@ func (PortForwarding) Update(ctx context.Context, req infer.UpdateRequest[PortFo
 		return infer.UpdateResponse[PortForwardingState]{}, fmt.Errorf("update port forwarding: %w", err)
 	}
 
-	state := PortForwardingState{
-		PortForwardingArgs: req.Inputs,
-		ID:                 rule.ID,
-		Hostname:           rule.Hostname,
-	}
+	state := portForwardingStateFromRule(req.Inputs, rule)
 	return infer.UpdateResponse[PortForwardingState]{Output: state}, nil
 }
 
@@ -210,5 +202,3 @@ func (PortForwarding) Delete(ctx context.Context, req infer.DeleteRequest[PortFo
 	freeboxLog("[freebox] PortForwarding Delete ruleId=%d: success\n", req.State.ID)
 	return infer.DeleteResponse{}, nil
 }
-
-func int64Ptr(i int64) *int64 { return &i }

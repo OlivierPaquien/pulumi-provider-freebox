@@ -4,99 +4,73 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/nikolalohinski/free-go/client"
 	freeboxTypes "github.com/nikolalohinski/free-go/types"
 	"github.com/pulumi/pulumi-go-provider/infer"
 )
 
-// VirtualDisk resource: manages a virtual disk image on the Freebox.
-// This is a simplified implementation: create from scratch only (no resize_from).
+// VirtualDisk manages a virtual disk image on the Freebox.
 type VirtualDisk struct{}
 
 type VirtualDiskArgs struct {
-	Path        string `pulumi:"path"`
-	Type        string `pulumi:"type,optional"`
-	VirtualSize int64  `pulumi:"virtualSize"`
+	Path        string                `pulumi:"path"`
+	Type        string                `pulumi:"type,optional"`
+	VirtualSize int64                 `pulumi:"virtualSize"`
+	ResizeFrom  *string               `pulumi:"resizeFrom,optional"`
+	Polling     *VirtualDiskPolling   `pulumi:"polling,optional"`
 }
 
 type VirtualDiskState struct {
 	VirtualDiskArgs
-	Type       string `pulumi:"type"`
-	SizeOnDisk int64  `pulumi:"sizeOnDisk"`
+	Type               string `pulumi:"type"`
+	SizeOnDisk         int64  `pulumi:"sizeOnDisk"`
+	ResizeFromChecksum string `pulumi:"resizeFromChecksum,optional"`
 }
 
 func (args *VirtualDiskArgs) Annotate(a infer.Annotator) {
 	a.Describe(&args.Path, "Path to the virtual disk on the Freebox.")
 	a.Describe(&args.Type, "Type of virtual disk (qcow2 or raw). Defaults to qcow2.")
 	a.Describe(&args.VirtualSize, "Size in bytes of the virtual disk (as seen inside the VM).")
+	a.Describe(&args.ResizeFrom, "Path to an existing disk to copy and resize from.")
 }
 
 func (st *VirtualDiskState) Annotate(a infer.Annotator) {
 	a.Describe(&st.Type, "Type of virtual disk.")
 	a.Describe(&st.SizeOnDisk, "Space in bytes used on disk.")
+	a.Describe(&st.ResizeFromChecksum, "SHA512 checksum of resizeFrom source (internal).")
 }
 
 func (VirtualDisk) Annotate(a infer.Annotator) {
-	// VirtualDisk est une struct vide ; l'Annotator reçoit ce type uniquement. Ne pas appeler Describe.
 	a.SetToken("virtual", "Disk")
 }
 
 func (VirtualDisk) Create(ctx context.Context, req infer.CreateRequest[VirtualDiskArgs]) (infer.CreateResponse[VirtualDiskState], error) {
-	cli, err := getFreeboxClient(ctx)
-	if err != nil {
-		return infer.CreateResponse[VirtualDiskState]{}, err
-	}
-
-	diskType := req.Inputs.Type
-	if diskType == "" {
-		diskType = freeboxTypes.QCow2Disk
-	}
-
-	payload := freeboxTypes.VirtualDisksCreatePayload{
-		DiskPath: freeboxTypes.Base64Path(req.Inputs.Path),
-		Size:     req.Inputs.VirtualSize,
-		DiskType: diskType,
-	}
-
 	if req.DryRun {
 		return infer.CreateResponse[VirtualDiskState]{
 			ID: req.Inputs.Path,
 			Output: VirtualDiskState{
 				VirtualDiskArgs: req.Inputs,
-				Type:            diskType,
+				Type:            virtualDiskType(req.Inputs),
 			},
 		}, nil
 	}
 
-	taskID, err := cli.CreateVirtualDisk(ctx, payload)
+	cli, err := getFreeboxClient(ctx)
 	if err != nil {
-		return infer.CreateResponse[VirtualDiskState]{}, fmt.Errorf("create virtual disk: %w", err)
+		return infer.CreateResponse[VirtualDiskState]{}, err
 	}
 
-	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-
-	if err := waitVirtualDiskTask(waitCtx, cli, taskID); err != nil {
-		return infer.CreateResponse[VirtualDiskState]{}, fmt.Errorf("wait for virtual disk creation: %w", err)
-	}
-	_ = cli.DeleteVirtualDiskTask(ctx, taskID)
-
-	info, err := cli.GetVirtualDiskInfo(ctx, req.Inputs.Path)
+	checksum, err := createVirtualDisk(ctx, cli, req.Inputs)
 	if err != nil {
-		return infer.CreateResponse[VirtualDiskState]{}, fmt.Errorf("get virtual disk info: %w", err)
+		return infer.CreateResponse[VirtualDiskState]{}, err
 	}
 
-	state := VirtualDiskState{
-		VirtualDiskArgs: req.Inputs,
-		Type:            string(info.Type),
-		SizeOnDisk:      info.ActualSize,
+	state, err := virtualDiskStateFromAPI(ctx, cli, req.Inputs, checksum)
+	if err != nil {
+		return infer.CreateResponse[VirtualDiskState]{}, err
 	}
-	return infer.CreateResponse[VirtualDiskState]{
-		ID:     req.Inputs.Path,
-		Output: state,
-	}, nil
+	return infer.CreateResponse[VirtualDiskState]{ID: req.Inputs.Path, Output: state}, nil
 }
 
 func (VirtualDisk) Read(ctx context.Context, req infer.ReadRequest[VirtualDiskArgs, VirtualDiskState]) (infer.ReadResponse[VirtualDiskArgs, VirtualDiskState], error) {
@@ -121,11 +95,25 @@ func (VirtualDisk) Read(ctx context.Context, req infer.ReadRequest[VirtualDiskAr
 	}
 
 	state := VirtualDiskState{
-		VirtualDiskArgs: req.State.VirtualDiskArgs,
-		Type:            string(info.Type),
-		SizeOnDisk:      info.ActualSize,
+		VirtualDiskArgs:    req.State.VirtualDiskArgs,
+		Type:               string(info.Type),
+		SizeOnDisk:         info.ActualSize,
+		ResizeFromChecksum: req.State.ResizeFromChecksum,
 	}
 	return infer.ReadResponse[VirtualDiskArgs, VirtualDiskState]{State: state}, nil
+}
+
+func (VirtualDisk) Update(ctx context.Context, req infer.UpdateRequest[VirtualDiskArgs, VirtualDiskState]) (infer.UpdateResponse[VirtualDiskState], error) {
+	cli, err := getFreeboxClient(ctx)
+	if err != nil {
+		return infer.UpdateResponse[VirtualDiskState]{}, err
+	}
+
+	state, err := updateVirtualDisk(ctx, cli, req.State.VirtualDiskArgs, req.Inputs, req.State.ResizeFromChecksum)
+	if err != nil {
+		return infer.UpdateResponse[VirtualDiskState]{}, err
+	}
+	return infer.UpdateResponse[VirtualDiskState]{Output: state}, nil
 }
 
 func (VirtualDisk) Delete(ctx context.Context, req infer.DeleteRequest[VirtualDiskState]) (infer.DeleteResponse, error) {
@@ -133,44 +121,10 @@ func (VirtualDisk) Delete(ctx context.Context, req infer.DeleteRequest[VirtualDi
 	if err != nil {
 		return infer.DeleteResponse{}, err
 	}
-	task, err := cli.RemoveFiles(ctx, []string{req.State.Path})
-	if err != nil {
-		return infer.DeleteResponse{}, err
+	polling := req.State.Polling.resolved()
+	deleteP := polling.Delete.withDefaults(defaultDeleteInterval(), defaultDeleteTimeout())
+	if err := deleteFilesIfExist(ctx, cli, deleteP, req.State.Path); err != nil {
+		return infer.DeleteResponse{}, fmt.Errorf("delete virtual disk: %w", err)
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	_ = waitFileSystemTask(waitCtx, cli, task.ID)
-	_ = stopAndDeleteFileSystemTask(ctx, cli, task.ID)
 	return infer.DeleteResponse{}, nil
-}
-
-func waitVirtualDiskTask(ctx context.Context, c client.Client, taskID int64) error {
-	events, err := c.ListenEvents(ctx, []freeboxTypes.EventDescription{{
-		Source: freeboxTypes.EventSourceVMDisk,
-		Name:   freeboxTypes.EventDiskTaskDone,
-	}})
-	if err != nil {
-		return err
-	}
-	for {
-		task, err := c.GetVirtualDiskTask(ctx, taskID)
-		if err != nil {
-			return err
-		}
-		if task.Done {
-			if task.Error {
-				return fmt.Errorf("disk task failed")
-			}
-			return nil
-		}
-		select {
-		case event := <-events:
-			if !event.Notification.Success {
-				return fmt.Errorf("disk task failed: %v", event.Error)
-			}
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
 }

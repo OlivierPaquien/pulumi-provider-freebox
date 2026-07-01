@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path"
 	"time"
 
 	"github.com/nikolalohinski/free-go/client"
@@ -12,100 +11,95 @@ import (
 	"github.com/pulumi/pulumi-go-provider/infer"
 )
 
-// RemoteFile resource: downloads a file from a URL to the Freebox.
-// Simplified: sourceURL and destinationPath only (no checksum, extract, or auth).
+// RemoteFile manages a file on the Freebox (download, copy, upload).
 type RemoteFile struct{}
 
 type RemoteFileArgs struct {
-	SourceURL       string `pulumi:"sourceUrl"`
-	DestinationPath string `pulumi:"destinationPath"`
+	DestinationPath  string                    `pulumi:"destinationPath"`
+	SourceURL        *string                   `pulumi:"sourceUrl,optional"`
+	SourceRemoteFile *string                   `pulumi:"sourceRemoteFile,optional"`
+	SourceContent    *string                   `pulumi:"sourceContent,optional"`
+	SourceLocalFile  *string                   `pulumi:"sourceLocalFile,optional"`
+	Checksum         *string                   `pulumi:"checksum,optional"`
+	Parents          *bool                     `pulumi:"parents,optional"`
+	Authentication   *RemoteFileAuthentication `pulumi:"authentication,optional"`
+	Extract          *RemoteFileExtract        `pulumi:"extract,optional"`
+	Polling          *RemoteFilePolling        `pulumi:"polling,optional"`
 }
 
 type RemoteFileState struct {
 	RemoteFileArgs
-	SizeOnDisk int64 `pulumi:"sizeOnDisk"`
+	Checksum   string `pulumi:"checksum"`
+	SizeOnDisk int64  `pulumi:"sizeOnDisk"`
 }
 
 func (args *RemoteFileArgs) Annotate(a infer.Annotator) {
-	a.Describe(&args.SourceURL, "URL of the file to download.")
 	a.Describe(&args.DestinationPath, "Path on the Freebox where the file will be stored.")
+	a.Describe(&args.SourceURL, "URL of the file to download.")
+	a.Describe(&args.SourceRemoteFile, "Path to an existing file on the Freebox to copy.")
+	a.Describe(&args.SourceContent, "Inline file content to upload.")
+	a.Describe(&args.SourceLocalFile, "Path to a local file to upload (relative to the Pulumi engine).")
+	a.Describe(&args.Checksum, "Expected checksum (method:value). Computed after create if omitted.")
+	a.Describe(&args.Parents, "Create parent directories if missing.")
 }
 
 func (st *RemoteFileState) Annotate(a infer.Annotator) {
+	a.Describe(&st.Checksum, "Checksum of the file on disk.")
 	a.Describe(&st.SizeOnDisk, "Size in bytes of the file on disk.")
 }
 
 func (RemoteFile) Annotate(a infer.Annotator) {
-	// RemoteFile est une struct vide ; l'Annotator reçoit ce type uniquement. Ne pas appeler Describe.
 	a.SetToken("downloads", "File")
 }
 
 func (RemoteFile) Create(ctx context.Context, req infer.CreateRequest[RemoteFileArgs]) (infer.CreateResponse[RemoteFileState], error) {
+	if err := validateRemoteFileArgs(req.Inputs); err != nil {
+		return infer.CreateResponse[RemoteFileState]{}, err
+	}
+
+	if req.DryRun {
+		return infer.CreateResponse[RemoteFileState]{
+			ID:     req.Inputs.DestinationPath,
+			Output: RemoteFileState{RemoteFileArgs: req.Inputs},
+		}, nil
+	}
+
 	cli, err := getFreeboxClient(ctx)
 	if err != nil {
 		return infer.CreateResponse[RemoteFileState]{}, err
 	}
 
 	dest := req.Inputs.DestinationPath
-	dir := path.Dir(dest)
-	filename := path.Base(dest)
-
-	if req.DryRun {
-		return infer.CreateResponse[RemoteFileState]{
-			ID:     dest,
-			Output: RemoteFileState{RemoteFileArgs: req.Inputs},
-		}, nil
-	}
-
-	info, err := cli.GetFileInfo(ctx, dest)
-	if err == nil {
-		// Fichier déjà présent (ex. après changement de token ou import) : adopter l'existant
-		state := RemoteFileState{
-			RemoteFileArgs: req.Inputs,
-			SizeOnDisk:     int64(info.SizeBytes),
-		}
-		return infer.CreateResponse[RemoteFileState]{
-			ID:     dest,
-			Output: state,
-		}, nil
-	}
-	if err != nil && !errors.Is(err, client.ErrPathNotFound) {
+	if _, err := cli.GetFileInfo(ctx, dest); err == nil {
+		return infer.CreateResponse[RemoteFileState]{}, fmt.Errorf("file already exists at %q; delete it or import the resource", dest)
+	} else if !errors.Is(err, client.ErrPathNotFound) {
 		return infer.CreateResponse[RemoteFileState]{}, fmt.Errorf("check file: %w", err)
 	}
 
-	payload := freeboxTypes.DownloadRequest{
-		DownloadURLs:      []string{req.Inputs.SourceURL},
-		DownloadDirectory: dir,
-		Filename:          filename,
+	if err := createRemoteFile(ctx, cli, req.Inputs); err != nil {
+		return infer.CreateResponse[RemoteFileState]{}, err
 	}
 
-	taskID, err := cli.AddDownloadTask(ctx, payload)
+	checksum, err := verifyRemoteFileChecksum(ctx, cli, req.Inputs, dest)
 	if err != nil {
-		return infer.CreateResponse[RemoteFileState]{}, fmt.Errorf("add download task: %w", err)
+		return infer.CreateResponse[RemoteFileState]{}, err
 	}
 
-	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
-
-	if err := waitDownloadTask(waitCtx, cli, taskID); err != nil {
-		_ = stopAndDeleteDownloadTask(ctx, cli, taskID)
-		return infer.CreateResponse[RemoteFileState]{}, fmt.Errorf("wait download: %w", err)
+	if err := extractRemoteFile(ctx, cli, req.Inputs, dest); err != nil {
+		return infer.CreateResponse[RemoteFileState]{}, err
 	}
-	_ = stopAndDeleteDownloadTask(ctx, cli, taskID)
 
-	info, err = cli.GetFileInfo(ctx, dest)
+	info, err := cli.GetFileInfo(ctx, dest)
 	if err != nil {
 		return infer.CreateResponse[RemoteFileState]{}, fmt.Errorf("get file info: %w", err)
 	}
 
 	state := RemoteFileState{
 		RemoteFileArgs: req.Inputs,
+		Checksum:       checksum,
 		SizeOnDisk:     int64(info.SizeBytes),
 	}
-	return infer.CreateResponse[RemoteFileState]{
-		ID:     dest,
-		Output: state,
-	}, nil
+	return infer.CreateResponse[RemoteFileState]{ID: dest, Output: state}, nil
 }
 
 func (RemoteFile) Read(ctx context.Context, req infer.ReadRequest[RemoteFileArgs, RemoteFileState]) (infer.ReadResponse[RemoteFileArgs, RemoteFileState], error) {
@@ -119,14 +113,93 @@ func (RemoteFile) Read(ctx context.Context, req infer.ReadRequest[RemoteFileArgs
 		if errors.Is(err, client.ErrPathNotFound) {
 			return infer.ReadResponse[RemoteFileArgs, RemoteFileState]{}, nil
 		}
-		return infer.ReadResponse[RemoteFileArgs, RemoteFileState]{}, fmt.Errorf("get file info: %w", err)
+		return infer.ReadResponse[RemoteFileArgs, RemoteFileState]{}, err
 	}
 
-	state := RemoteFileState{
-		RemoteFileArgs: req.State.RemoteFileArgs,
-		SizeOnDisk:     int64(info.SizeBytes),
-	}
+	state := req.State
+	state.SizeOnDisk = int64(info.SizeBytes)
 	return infer.ReadResponse[RemoteFileArgs, RemoteFileState]{State: state}, nil
+}
+
+func (RemoteFile) Update(ctx context.Context, req infer.UpdateRequest[RemoteFileArgs, RemoteFileState]) (infer.UpdateResponse[RemoteFileState], error) {
+	old := req.State
+	new := req.Inputs
+	if err := validateRemoteFileArgs(new); err != nil {
+		return infer.UpdateResponse[RemoteFileState]{}, err
+	}
+
+	cli, err := getFreeboxClient(ctx)
+	if err != nil {
+		return infer.UpdateResponse[RemoteFileState]{}, err
+	}
+
+	recreate := sourceChanged(old.RemoteFileArgs, new)
+	if !recreate && old.Checksum != "" && ptrStr(new.Checksum) != "" && old.Checksum != ptrStr(new.Checksum) {
+		recreate = true
+	}
+
+	polling := new.Polling.resolved()
+
+	if recreate {
+		deleteP := polling.Delete.withDefaults(defaultDeleteInterval(), defaultDeleteTimeout())
+		if err := deleteFilesIfExist(ctx, cli, deleteP, old.DestinationPath); err != nil {
+			return infer.UpdateResponse[RemoteFileState]{}, err
+		}
+		if err := createRemoteFile(ctx, cli, new); err != nil {
+			return infer.UpdateResponse[RemoteFileState]{}, err
+		}
+		checksum, err := verifyRemoteFileChecksum(ctx, cli, new, new.DestinationPath)
+		if err != nil {
+			return infer.UpdateResponse[RemoteFileState]{}, err
+		}
+		info, err := cli.GetFileInfo(ctx, new.DestinationPath)
+		if err != nil {
+			return infer.UpdateResponse[RemoteFileState]{}, err
+		}
+		return infer.UpdateResponse[RemoteFileState]{Output: RemoteFileState{
+			RemoteFileArgs: new,
+			Checksum:       checksum,
+			SizeOnDisk:     int64(info.SizeBytes),
+		}}, nil
+	}
+
+	if old.DestinationPath != new.DestinationPath {
+		if _, err := cli.GetFileInfo(ctx, new.DestinationPath); err == nil {
+			return infer.UpdateResponse[RemoteFileState]{}, fmt.Errorf("file already exists at %q", new.DestinationPath)
+		} else if !errors.Is(err, client.ErrPathNotFound) {
+			return infer.UpdateResponse[RemoteFileState]{}, err
+		}
+		task, err := cli.MoveFiles(ctx, []string{old.DestinationPath}, new.DestinationPath, freeboxTypes.FileMoveModeOverwrite)
+		if err != nil {
+			return infer.UpdateResponse[RemoteFileState]{}, err
+		}
+		moveP := polling.Move.withDefaults(defaultDeleteInterval(), defaultDeleteTimeout())
+		if err := waitFileSystemTask(ctx, cli, task.ID, moveP); err != nil {
+			return infer.UpdateResponse[RemoteFileState]{}, err
+		}
+		if err := stopAndDeleteFileSystemTask(ctx, cli, task.ID); err != nil {
+			return infer.UpdateResponse[RemoteFileState]{}, err
+		}
+		info, err := cli.GetFileInfo(ctx, new.DestinationPath)
+		if err != nil {
+			return infer.UpdateResponse[RemoteFileState]{}, err
+		}
+		state := RemoteFileState{
+			RemoteFileArgs: new,
+			Checksum:       old.Checksum,
+			SizeOnDisk:     int64(info.SizeBytes),
+		}
+		return infer.UpdateResponse[RemoteFileState]{Output: state}, nil
+	}
+
+	return infer.UpdateResponse[RemoteFileState]{Output: old}, nil
+}
+
+func sourceChanged(old, new RemoteFileArgs) bool {
+	return ptrStr(old.SourceURL) != ptrStr(new.SourceURL) ||
+		ptrStr(old.SourceRemoteFile) != ptrStr(new.SourceRemoteFile) ||
+		ptrStr(old.SourceContent) != ptrStr(new.SourceContent) ||
+		ptrStr(old.SourceLocalFile) != ptrStr(new.SourceLocalFile)
 }
 
 func (RemoteFile) Delete(ctx context.Context, req infer.DeleteRequest[RemoteFileState]) (infer.DeleteResponse, error) {
@@ -135,54 +208,15 @@ func (RemoteFile) Delete(ctx context.Context, req infer.DeleteRequest[RemoteFile
 	if err != nil {
 		return infer.DeleteResponse{}, err
 	}
-	task, err := cli.RemoveFiles(ctx, []string{req.State.DestinationPath})
-	if err != nil {
-		return infer.DeleteResponse{}, fmt.Errorf("remove files: %w", err)
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	if err := waitFileSystemTask(waitCtx, cli, task.ID); err != nil {
+	polling := req.State.Polling.resolved()
+	deleteP := polling.Delete.withDefaults(defaultDeleteInterval(), defaultDeleteTimeout())
+	if err := deleteFilesIfExist(ctx, cli, deleteP, req.State.DestinationPath); err != nil {
 		freeboxLog("[freebox] RemoteFile Delete path=%q: %v\n", req.State.DestinationPath, err)
-		return infer.DeleteResponse{}, fmt.Errorf("wait for file removal: %w", err)
-	}
-	if err := stopAndDeleteFileSystemTask(ctx, cli, task.ID); err != nil {
-		freeboxLog("[freebox] RemoteFile Delete path=%q: %v\n", req.State.DestinationPath, err)
-		return infer.DeleteResponse{}, fmt.Errorf("stop/delete fs task: %w", err)
+		return infer.DeleteResponse{}, err
 	}
 	freeboxLog("[freebox] RemoteFile Delete path=%q: success\n", req.State.DestinationPath)
 	return infer.DeleteResponse{}, nil
 }
 
-func waitDownloadTask(ctx context.Context, c client.Client, taskID int64) error {
-	tick := time.NewTicker(3 * time.Second)
-	defer tick.Stop()
-	for {
-		task, err := c.GetDownloadTask(ctx, taskID)
-		if err != nil {
-			return err
-		}
-		switch task.Status {
-		case freeboxTypes.DownloadTaskStatusDone:
-			return nil
-		case freeboxTypes.DownloadTaskStatusError:
-			return fmt.Errorf("download failed: %s", task.Error)
-		case freeboxTypes.DownloadTaskStatusStopped:
-			return fmt.Errorf("download stopped")
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-tick.C:
-		}
-	}
-}
-
-func stopAndDeleteDownloadTask(ctx context.Context, c client.Client, taskID int64) error {
-	_ = c.UpdateDownloadTask(ctx, taskID, freeboxTypes.DownloadTaskUpdate{
-		Status: freeboxTypes.DownloadTaskStatusStopped,
-	})
-	if err := c.DeleteDownloadTask(ctx, taskID); err != nil && !errors.Is(err, client.ErrTaskNotFound) {
-		return err
-	}
-	return nil
-}
+func defaultDeleteInterval() time.Duration { return time.Second }
+func defaultDeleteTimeout() time.Duration { return time.Minute }

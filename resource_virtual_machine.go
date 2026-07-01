@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -21,19 +22,20 @@ type vmStateEvent struct {
 type VirtualMachine struct{}
 
 type VirtualMachineArgs struct {
-	Name              string   `pulumi:"name"`
-	DiskPath          string   `pulumi:"diskPath"`
-	DiskType          string   `pulumi:"diskType"`
-	Memory            int64    `pulumi:"memory"`
-	VCPUs             int64    `pulumi:"vcpus"`
-	Status            string   `pulumi:"status,optional"`
-	CDPath            string   `pulumi:"cdPath,optional"`
-	OS                string   `pulumi:"os,optional"`
-	EnableScreen      bool     `pulumi:"enableScreen,optional"`
-	EnableCloudInit   bool     `pulumi:"enableCloudinit,optional"`
-	CloudInitUserData string   `pulumi:"cloudinitUserdata,optional"`
-	CloudInitHostname string   `pulumi:"cloudinitHostname,optional"`
-	BindUSBPorts      []string `pulumi:"bindUsbPorts,optional"`
+	Name              string                  `pulumi:"name"`
+	DiskPath          string                  `pulumi:"diskPath"`
+	DiskType          string                  `pulumi:"diskType"`
+	Memory            int64                   `pulumi:"memory"`
+	VCPUs             int64                   `pulumi:"vcpus"`
+	Status            string                  `pulumi:"status,optional"`
+	CDPath            string                  `pulumi:"cdPath,optional"`
+	OS                string                  `pulumi:"os,optional"`
+	EnableScreen      bool                    `pulumi:"enableScreen,optional"`
+	EnableCloudInit   bool                    `pulumi:"enableCloudinit,optional"`
+	CloudInitUserData string                  `pulumi:"cloudinitUserdata,optional"`
+	CloudInitHostname string                  `pulumi:"cloudinitHostname,optional"`
+	BindUSBPorts      []string                `pulumi:"bindUsbPorts,optional"`
+	Timeouts          *VirtualMachineTimeouts `pulumi:"timeouts,optional"`
 }
 
 // NetworkingBind holds one network bind (interface + IPv4/IPv6) for the VM.
@@ -45,11 +47,12 @@ type NetworkingBind struct {
 
 type VirtualMachineState struct {
 	VirtualMachineArgs
-	ID         int64            `pulumi:"vmId"` // id réservé par Pulumi
-	Mac        string           `pulumi:"mac"`
-	Status     string           `pulumi:"status"`
-	Networking []NetworkingBind `pulumi:"networking,optional"`
-	Ipv4       string           `pulumi:"ipv4,optional"` // First IPv4 (convenience, same as networking[0].ipv4)
+	ID         int64                   `pulumi:"vmId"` // id réservé par Pulumi
+	Mac        string                  `pulumi:"mac"`
+	Status     string                  `pulumi:"status"`
+	Networking []NetworkingBind        `pulumi:"networking,optional"`
+	Ipv4       string                  `pulumi:"ipv4,optional"` // First IPv4 (convenience, same as networking[0].ipv4)
+	Timeouts   *VirtualMachineTimeouts `pulumi:"timeouts,optional"`
 }
 
 func (args *VirtualMachineArgs) Annotate(a infer.Annotator) {
@@ -66,6 +69,7 @@ func (args *VirtualMachineArgs) Annotate(a infer.Annotator) {
 	a.Describe(&args.CloudInitUserData, "Cloud-init user-data.")
 	a.Describe(&args.CloudInitHostname, "Cloud-init hostname.")
 	a.Describe(&args.BindUSBPorts, "USB ports to bind.")
+	a.Describe(&args.Timeouts, "Operation timeouts (create, update, read, delete, kill, networking).")
 }
 
 func (st *VirtualMachineState) Annotate(a infer.Annotator) {
@@ -101,16 +105,65 @@ func toPayload(in VirtualMachineArgs) freeboxTypes.VirtualMachinePayload {
 	return p
 }
 
+func desiredVMStatus(in VirtualMachineArgs) string {
+	status := in.Status
+	if status == "" {
+		status = freeboxTypes.RunningStatus
+	}
+	return status
+}
+
+func fillVMNetworking(ctx context.Context, cli client.Client, vm freeboxTypes.VirtualMachine, state *VirtualMachineState, networkingTimeout time.Duration) {
+	if state.Status != freeboxTypes.RunningStatus {
+		return
+	}
+	binds, err := getNetworkBinds(ctx, cli, vm, networkingTimeout)
+	if err != nil {
+		freeboxLog("[freebox] VM vmId=%d: get network binds: %v\n", vm.ID, err)
+		return
+	}
+	if len(binds) > 0 {
+		state.Networking = binds
+		state.Ipv4 = binds[0].Ipv4
+	}
+}
+
+func applyVMDesiredStatus(ctx context.Context, cli client.Client, vmID int64, desiredStatus string, killTimeout time.Duration) (string, error) {
+	switch desiredStatus {
+	case freeboxTypes.RunningStatus:
+		return vmStart(ctx, cli, vmID)
+	case freeboxTypes.StoppedStatus:
+		vm, err := cli.GetVirtualMachine(ctx, vmID)
+		if err != nil {
+			return "", fmt.Errorf("get VM: %w", err)
+		}
+		if vm.Status == freeboxTypes.StoppedStatus || vm.Status == freeboxTypes.StoppingStatus {
+			return freeboxTypes.StoppedStatus, nil
+		}
+		return vmStop(ctx, cli, vmID, killTimeout)
+	default:
+		return "", fmt.Errorf("unsupported VM status %q", desiredStatus)
+	}
+}
+
+func ensureVMStoppedForConfigChange(ctx context.Context, cli client.Client, vmID int64, currentStatus string, killTimeout time.Duration) error {
+	if currentStatus == freeboxTypes.StoppedStatus || currentStatus == freeboxTypes.StoppingStatus {
+		return nil
+	}
+	if _, err := vmStop(ctx, cli, vmID, killTimeout); err != nil {
+		return fmt.Errorf("stop VM before config change: %w", err)
+	}
+	return nil
+}
+
 func (VirtualMachine) Create(ctx context.Context, req infer.CreateRequest[VirtualMachineArgs]) (infer.CreateResponse[VirtualMachineState], error) {
 	cli, err := getFreeboxClient(ctx)
 	if err != nil {
 		return infer.CreateResponse[VirtualMachineState]{}, err
 	}
 
-	status := req.Inputs.Status
-	if status == "" {
-		status = freeboxTypes.RunningStatus
-	}
+	timeouts := req.Inputs.Timeouts.resolved()
+	status := desiredVMStatus(req.Inputs)
 
 	if req.DryRun {
 		return infer.CreateResponse[VirtualMachineState]{
@@ -118,11 +171,15 @@ func (VirtualMachine) Create(ctx context.Context, req infer.CreateRequest[Virtua
 			Output: VirtualMachineState{
 				VirtualMachineArgs: req.Inputs,
 				Status:             status,
+				Timeouts:           req.Inputs.Timeouts,
 			},
 		}, nil
 	}
 
-	vm, err := cli.CreateVirtualMachine(ctx, toPayload(req.Inputs))
+	createCtx, cancel := context.WithTimeout(ctx, timeouts.Create)
+	defer cancel()
+
+	vm, err := cli.CreateVirtualMachine(createCtx, toPayload(req.Inputs))
 	if err != nil {
 		return infer.CreateResponse[VirtualMachineState]{}, fmt.Errorf("create VM: %w", err)
 	}
@@ -132,23 +189,16 @@ func (VirtualMachine) Create(ctx context.Context, req infer.CreateRequest[Virtua
 		ID:                 vm.ID,
 		Mac:                vm.Mac,
 		Status:             vm.Status,
+		Timeouts:           req.Inputs.Timeouts,
 	}
 
-	if status == freeboxTypes.RunningStatus {
-		newStatus, err := vmStart(ctx, cli, vm.ID)
-		if err != nil {
-			return infer.CreateResponse[VirtualMachineState]{}, fmt.Errorf("start VM: %w", err)
-		}
-		state.Status = newStatus
+	newStatus, err := applyVMDesiredStatus(createCtx, cli, vm.ID, status, timeouts.Kill)
+	if err != nil {
+		return infer.CreateResponse[VirtualMachineState]{}, fmt.Errorf("set VM status: %w", err)
 	}
+	state.Status = newStatus
 
-	if state.Status == freeboxTypes.RunningStatus {
-		binds, err := getNetworkBinds(ctx, cli, vm, time.Minute)
-		if err == nil && len(binds) > 0 {
-			state.Networking = binds
-			state.Ipv4 = binds[0].Ipv4
-		}
-	}
+	fillVMNetworking(createCtx, cli, vm, &state, timeouts.Networking)
 
 	return infer.CreateResponse[VirtualMachineState]{
 		ID:     fmt.Sprintf("%d", vm.ID),
@@ -162,9 +212,16 @@ func (VirtualMachine) Read(ctx context.Context, req infer.ReadRequest[VirtualMac
 		return infer.ReadResponse[VirtualMachineArgs, VirtualMachineState]{}, err
 	}
 
-	vm, err := cli.GetVirtualMachine(ctx, req.State.ID)
+	timeouts := req.State.Timeouts.resolved()
+	readCtx, cancel := context.WithTimeout(ctx, timeouts.Read)
+	defer cancel()
+
+	vm, err := cli.GetVirtualMachine(readCtx, req.State.ID)
 	if err != nil {
-		return infer.ReadResponse[VirtualMachineArgs, VirtualMachineState]{}, nil
+		if errors.Is(err, client.ErrVirtualMachineNotFound) {
+			return infer.ReadResponse[VirtualMachineArgs, VirtualMachineState]{}, nil
+		}
+		return infer.ReadResponse[VirtualMachineArgs, VirtualMachineState]{}, fmt.Errorf("get VM: %w", err)
 	}
 
 	state := VirtualMachineState{
@@ -172,14 +229,9 @@ func (VirtualMachine) Read(ctx context.Context, req infer.ReadRequest[VirtualMac
 		ID:                 vm.ID,
 		Mac:                vm.Mac,
 		Status:             vm.Status,
+		Timeouts:           req.State.Timeouts,
 	}
-	if vm.Status == freeboxTypes.RunningStatus {
-		binds, err := getNetworkBinds(ctx, cli, vm, time.Minute)
-		if err == nil && len(binds) > 0 {
-			state.Networking = binds
-			state.Ipv4 = binds[0].Ipv4
-		}
-	}
+	fillVMNetworking(readCtx, cli, vm, &state, timeouts.Networking)
 	return infer.ReadResponse[VirtualMachineArgs, VirtualMachineState]{State: state}, nil
 }
 
@@ -189,10 +241,8 @@ func (VirtualMachine) Update(ctx context.Context, req infer.UpdateRequest[Virtua
 		return infer.UpdateResponse[VirtualMachineState]{}, err
 	}
 
-	desiredStatus := req.Inputs.Status
-	if desiredStatus == "" {
-		desiredStatus = freeboxTypes.RunningStatus
-	}
+	timeouts := req.Inputs.Timeouts.resolved()
+	desiredStatus := desiredVMStatus(req.Inputs)
 
 	if req.DryRun {
 		return infer.UpdateResponse[VirtualMachineState]{
@@ -201,42 +251,37 @@ func (VirtualMachine) Update(ctx context.Context, req infer.UpdateRequest[Virtua
 				ID:                 req.State.ID,
 				Mac:                req.State.Mac,
 				Status:             desiredStatus,
+				Timeouts:           req.Inputs.Timeouts,
 			},
 		}, nil
 	}
 
-	killTimeout := 30 * time.Second
-	if req.State.Status != freeboxTypes.StoppedStatus {
-		_, _ = vmStop(ctx, cli, req.State.ID, killTimeout)
+	updateCtx, cancel := context.WithTimeout(ctx, timeouts.Update)
+	defer cancel()
+
+	if err := ensureVMStoppedForConfigChange(updateCtx, cli, req.State.ID, req.State.Status, timeouts.Kill); err != nil {
+		return infer.UpdateResponse[VirtualMachineState]{}, err
 	}
 
-	vm, err := cli.UpdateVirtualMachine(ctx, req.State.ID, toPayload(req.Inputs))
+	vm, err := cli.UpdateVirtualMachine(updateCtx, req.State.ID, toPayload(req.Inputs))
 	if err != nil {
 		return infer.UpdateResponse[VirtualMachineState]{}, fmt.Errorf("update VM: %w", err)
+	}
+
+	newStatus, err := applyVMDesiredStatus(updateCtx, cli, vm.ID, desiredStatus, timeouts.Kill)
+	if err != nil {
+		return infer.UpdateResponse[VirtualMachineState]{}, fmt.Errorf("set VM status: %w", err)
 	}
 
 	state := VirtualMachineState{
 		VirtualMachineArgs: req.Inputs,
 		ID:                 vm.ID,
 		Mac:                vm.Mac,
-		Status:             vm.Status,
+		Status:             newStatus,
+		Timeouts:           req.Inputs.Timeouts,
 	}
 
-	if desiredStatus == freeboxTypes.RunningStatus {
-		newStatus, err := vmStart(ctx, cli, vm.ID)
-		if err != nil {
-			return infer.UpdateResponse[VirtualMachineState]{}, fmt.Errorf("start VM: %w", err)
-		}
-		state.Status = newStatus
-	}
-
-	if state.Status == freeboxTypes.RunningStatus {
-		binds, err := getNetworkBinds(ctx, cli, vm, time.Minute)
-		if err == nil && len(binds) > 0 {
-			state.Networking = binds
-			state.Ipv4 = binds[0].Ipv4
-		}
-	}
+	fillVMNetworking(updateCtx, cli, vm, &state, timeouts.Networking)
 
 	return infer.UpdateResponse[VirtualMachineState]{Output: state}, nil
 }
@@ -248,11 +293,15 @@ func (VirtualMachine) Delete(ctx context.Context, req infer.DeleteRequest[Virtua
 	if err != nil {
 		return infer.DeleteResponse{}, err
 	}
-	killTimeout := 30 * time.Second
-	if req.State.Status != freeboxTypes.StoppedStatus {
-		_, _ = vmStop(ctx, cli, vmId, killTimeout)
+	timeouts := req.State.Timeouts.resolved()
+	deleteCtx, cancel := context.WithTimeout(ctx, timeouts.Delete)
+	defer cancel()
+
+	if err := ensureVMStoppedForConfigChange(deleteCtx, cli, vmId, req.State.Status, timeouts.Kill); err != nil {
+		freeboxLog("[freebox] VirtualMachine Delete vmId=%d: stop failed: %v\n", vmId, err)
+		return infer.DeleteResponse{}, err
 	}
-	err = cli.DeleteVirtualMachine(ctx, vmId)
+	err = cli.DeleteVirtualMachine(deleteCtx, vmId)
 	if err != nil {
 		freeboxLog("[freebox] VirtualMachine Delete vmId=%d: %v\n", vmId, err)
 		return infer.DeleteResponse{}, err
@@ -311,7 +360,9 @@ func vmStop(ctx context.Context, c client.Client, id int64, killTimeout time.Dur
 				return e.Status, nil
 			}
 		case <-deadline:
-			_ = c.KillVirtualMachine(ctx, id)
+			if err := c.KillVirtualMachine(ctx, id); err != nil {
+				freeboxLog("[freebox] VM vmId=%d: kill after stop timeout: %v\n", id, err)
+			}
 			return freeboxTypes.StoppedStatus, nil
 		case <-ctx.Done():
 			return "", ctx.Err()

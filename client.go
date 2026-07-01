@@ -1,82 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"net/http"
+	"net/url"
 	"os"
-	"time"
+	"strings"
 
 	"github.com/nikolalohinski/free-go/client"
 	"github.com/pulumi/pulumi-go-provider/infer"
 )
-
-// retryTransport retries on 502/503/504 (transient gateway errors).
-type retryTransport struct {
-	rt         http.RoundTripper
-	maxRetries int
-}
-
-func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	var resp *http.Response
-	var err error
-	for attempt := 0; attempt <= t.maxRetries; attempt++ {
-		resp, err = t.rt.RoundTrip(req)
-		if err != nil {
-			return nil, err
-		}
-		if resp.StatusCode != 502 && resp.StatusCode != 503 && resp.StatusCode != 504 {
-			return resp, nil
-		}
-		// Only retry GET/DELETE (no body); POST/PUT body is already consumed
-		if req.Body != nil {
-			return resp, nil
-		}
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-		if attempt < t.maxRetries {
-			backoff := time.Duration(attempt+1) * 2 * time.Second
-			time.Sleep(backoff)
-			retryReq, err := http.NewRequestWithContext(req.Context(), req.Method, req.URL.String(), nil)
-			if err != nil {
-				return resp, nil
-			}
-			retryReq.Header = req.Header.Clone()
-			req = retryReq
-		} else {
-			return resp, nil
-		}
-	}
-	return resp, nil
-}
-
-// debugTransport logs HTTP requests and responses when FREEBOX_DEBUG_HTTP=1.
-type debugTransport struct {
-	rt http.RoundTripper
-}
-
-func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	freeboxLog("[freebox http] %s %s\n", req.Method, req.URL.String())
-	resp, err := t.rt.RoundTrip(req)
-	if err != nil {
-		freeboxLog("[freebox http] error: %v\n", err)
-		return nil, err
-	}
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	resp.Body = io.NopCloser(bytes.NewReader(body))
-	freeboxLog("[freebox http] %d body=%s\n", resp.StatusCode, truncate(string(body), 500))
-	return resp, nil
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
-}
 
 const (
 	defaultEndpoint = "http://mafreebox.freebox.fr"
@@ -89,8 +22,37 @@ const (
 
 // getFreeboxClient returns a configured Freebox API client from provider config or env.
 func getFreeboxClient(ctx context.Context) (client.Client, error) {
-	cfg := infer.GetConfig[Config](ctx)
+	cfg := providerConfig(ctx)
+	if cfg.AppID == "" || cfg.Token == "" {
+		return nil, fmt.Errorf("Freebox provider requires appId and token (or FREEBOX_APP_ID and FREEBOX_TOKEN)")
+	}
 
+	freeboxLog("[freebox] client endpoint=%q apiVersion=%q appId=%q\n", cfg.Endpoint, cfg.APIVersion, cfg.AppID)
+
+	c, err := client.New(cfg.Endpoint, cfg.APIVersion)
+	if err != nil {
+		return nil, fmt.Errorf("create freebox client: %w", err)
+	}
+	c = c.WithAppID(cfg.AppID).WithPrivateToken(cfg.Token)
+	return c, nil
+}
+
+// providerConfig merges Pulumi provider config with environment variables.
+func providerConfig(ctx context.Context) Config {
+	return mergeConfigWithEnv(inferConfigIfPresent(ctx))
+}
+
+func inferConfigIfPresent(ctx context.Context) (cfg Config) {
+	defer func() {
+		if recover() != nil {
+			cfg = Config{}
+		}
+	}()
+	cfg = infer.GetConfig[Config](ctx)
+	return cfg
+}
+
+func mergeConfigWithEnv(cfg Config) Config {
 	endpoint := defaultEndpoint
 	if v := os.Getenv(envEndpoint); v != "" {
 		endpoint = v
@@ -116,14 +78,29 @@ func getFreeboxClient(ctx context.Context) (client.Client, error) {
 		token = cfg.Token
 	}
 
-	if appID == "" || token == "" {
-		return nil, fmt.Errorf("Freebox provider requires appId and token (or FREEBOX_APP_ID and FREEBOX_TOKEN)")
+	return Config{
+		Endpoint:   endpoint,
+		APIVersion: version,
+		AppID:      appID,
+		Token:      token,
 	}
+}
 
-	c, err := client.New(endpoint, version)
-	if err != nil {
-		return nil, fmt.Errorf("create freebox client: %w", err)
+func apiBaseURL(cfg Config) (string, error) {
+	endpoint := cfg.Endpoint
+	if endpoint == "" {
+		endpoint = defaultEndpoint
 	}
-	c = c.WithAppID(appID).WithPrivateToken(token)
-	return c, nil
+	version := cfg.APIVersion
+	if version == "" {
+		version = defaultVersion
+	}
+	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+		endpoint = "http://" + endpoint
+	}
+	base, err := url.Parse(fmt.Sprintf("%s/api/%s", endpoint, version))
+	if err != nil {
+		return "", fmt.Errorf("build api base url: %w", err)
+	}
+	return strings.TrimRight(base.String(), "/"), nil
 }

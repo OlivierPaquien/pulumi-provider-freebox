@@ -22,6 +22,11 @@ func TestProvider(t *testing.T) {
 	// Run resource tests
 	t.Run("PortForwarding", testPortForwarding)
 	t.Run("RemoteFile", testRemoteFile)
+	t.Run("VpnServer", testVpnServer)
+	t.Run("VpnUser", testVpnUser)
+	if os.Getenv("FREEBOX_TEST_DISK_PATH") != "" || os.Getenv("FREEBOX_TEST_VM_ID") != "" {
+		t.Run("VirtualMachinePower", testVirtualMachinePower)
+	}
 	if os.Getenv("FREEBOX_TEST_DISK_PATH") != "" {
 		t.Run("VirtualMachine", testVirtualMachine)
 	}
@@ -59,11 +64,24 @@ func newTestServer(t *testing.T, cfg Config) integration.Server {
 			infer.Resource(PortForwarding{}),
 			infer.Resource(VirtualDisk{}),
 			infer.Resource(VirtualMachine{}),
+			infer.Resource(VirtualMachinePower{}),
+			infer.Resource(DHCPStaticLease{}),
 			infer.Resource(RemoteFile{}),
+			infer.Resource(VpnServer{}),
+			infer.Resource(VpnUser{}),
+			infer.Resource(LanConfig{}),
 		).
 		WithFunctions(
 			infer.Function(GetApiVersion{}),
 			infer.Function(GetVirtualDisk{}),
+			infer.Function(GetDhcpLease{}),
+			infer.Function(GetDhcpLeases{}),
+			infer.Function(GetLanConfig{}),
+			infer.Function(GetLanInterfaces{}),
+			infer.Function(GetLanInterfaceHosts{}),
+			infer.Function(GetLanInterfaceHost{}),
+			infer.Function(GetVmDistributions{}),
+			infer.Function(GetSystemInfo{}),
 		).
 		WithModuleMap(map[tokens.ModuleName]tokens.ModuleName{
 			"main": "index", "pulumi-provider-freebox": "index",
@@ -74,7 +92,7 @@ func newTestServer(t *testing.T, cfg Config) integration.Server {
 	s, err := integration.NewServer(
 		context.Background(),
 		"freebox",
-		semver.MustParse("0.1.1"),
+		semver.MustParse("0.2.0"),
 		integration.WithProvider(p),
 	)
 	require.NoError(t, err)

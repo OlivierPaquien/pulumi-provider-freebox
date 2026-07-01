@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	p "github.com/pulumi/pulumi-go-provider"
+	"github.com/pulumi/pulumi/sdk/v3/go/common/resource"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/tokens"
 	"github.com/pulumi/pulumi/sdk/v3/go/property"
 	"github.com/stretchr/testify/assert"
@@ -16,7 +17,7 @@ import (
 )
 
 // getApiVersionToken : token public (ModuleMap expose le module "index").
-const getApiVersionToken = "freebox:index:getApiVersion"
+const getApiVersionToken = "freebox:api:Version"
 
 // apiVersionJSON est le corps de réponse mock pour GET /api/v0/api_version (ou /api/v42/api_version).
 func apiVersionJSON() string {
@@ -114,4 +115,47 @@ func TestProvider_ConfigFromBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, resp.Failures)
 	assert.Equal(t, property.New("11.1"), resp.Return.Get("apiVersion"))
+}
+
+const dhcpStaticLeaseType = "freebox:dhcp:StaticLease"
+const getDhcpLeaseToken = "freebox:dhcp:getLease"
+
+func TestProvider_DHCPStaticLeaseInvalidMAC(t *testing.T) {
+	cfg := Config{
+		Endpoint:   "http://localhost",
+		APIVersion: "v0",
+		AppID:      "test",
+		Token:      "x",
+	}
+	server := newTestServer(t, cfg)
+	urn := resource.NewURN("stack", "proj", "", tokens.Type(dhcpStaticLeaseType), "bad-lease")
+
+	_, err := server.Create(p.CreateRequest{
+		Urn: urn,
+		Properties: property.NewMap(map[string]property.Value{
+			"mac": property.New("not-a-mac"),
+			"ip":  property.New("192.168.1.10"),
+		}),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mac")
+}
+
+func TestProvider_GetDhcpLeaseInvalidMAC(t *testing.T) {
+	cfg := Config{
+		Endpoint:   "http://localhost",
+		APIVersion: "v0",
+		AppID:      "test",
+		Token:      "x",
+	}
+	server := newTestServer(t, cfg)
+
+	_, err := server.Invoke(p.InvokeRequest{
+		Token: tokens.Type(getDhcpLeaseToken),
+		Args: property.NewMap(map[string]property.Value{
+			"mac": property.New("invalid"),
+		}),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mac")
 }

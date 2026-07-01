@@ -31,17 +31,27 @@ func logPaths() []string {
 	if runtime.GOOS == "windows" {
 		paths = append(paths, filepath.Join(os.TempDir(), defaultLogFile))
 	}
-	// Dernier recours : répertoire courant (ex. quand on lance ./bin/pulumi-resource-freebox depuis le projet)
 	if cwd, err := os.Getwd(); err == nil {
 		paths = append(paths, filepath.Join(cwd, defaultLogFile))
 	}
 	return paths
 }
 
+func writeLogLine(dest *os.File, msg string) {
+	if dest == nil {
+		return
+	}
+	if _, err := dest.WriteString(msg); err != nil {
+		fmt.Fprintf(os.Stderr, "[freebox] log write error: %v\n", err)
+	}
+}
+
 // freeboxLog writes to stderr and to a file. Tries /tmp, $HOME/.pulumi/, puis le cwd.
 func freeboxLog(format string, a ...interface{}) {
 	msg := fmt.Sprintf(format, a...)
-	os.Stderr.WriteString(msg)
+	if _, err := os.Stderr.WriteString(msg); err != nil {
+		fmt.Fprintf(os.Stderr, "[freebox] stderr write error: %v\n", err)
+	}
 	logFileMu.Lock()
 	defer logFileMu.Unlock()
 	if logFile == nil {
@@ -62,14 +72,12 @@ func freeboxLog(format string, a ...interface{}) {
 			logFile = f
 			logPath = p
 			errs = nil
-			logFile.WriteString(fmt.Sprintf("[freebox] log file: %s\n", logPath))
+			writeLogLine(logFile, fmt.Sprintf("[freebox] log file: %s\n", logPath))
 			break
 		}
 		if logFile == nil && len(errs) > 0 {
 			os.Stderr.WriteString("[freebox] impossible d'ouvrir le fichier de log: " + fmt.Sprint(errs) + "\n")
 		}
 	}
-	if logFile != nil {
-		logFile.WriteString(msg)
-	}
+	writeLogLine(logFile, msg)
 }

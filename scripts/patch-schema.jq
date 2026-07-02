@@ -6,3 +6,4 @@ del(.version)
 | .language.python.packageName = "pulumi_freebox"
 | .language.go.importBasePath = "github.com/OlivierPaquien/pulumi-freebox/sdk/go/freebox"
 | .language.go.generateResourceContainerTypes = true
+| .language.csharp.rootNamespace = "OlivierPaquien.Pulumi"

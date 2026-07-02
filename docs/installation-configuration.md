@@ -72,7 +72,7 @@ Once the provider is fully published, install commands will look like this:
 |----------|-------------------------------|
 | Node.js (TypeScript/JavaScript) | `npm install pulumi-freebox` |
 | Python | `pip install pulumi-freebox` |
-| .NET | `dotnet add package Pulumi.Freebox` |
+| .NET | `dotnet add package OlivierPaquien.Pulumi.Freebox` |
 | Go | `go get github.com/OlivierPaquien/pulumi-freebox/sdk/go/freebox@VERSION` |
 
 These commands only work after the corresponding packages are published as part of the release process. Until then, use the plugin binary plus local SDK generation above.

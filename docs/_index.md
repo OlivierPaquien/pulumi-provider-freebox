@@ -86,7 +86,7 @@ pf = freebox.PortForwarding(
 
 ```csharp
 using Pulumi;
-using Pulumi.Freebox;
+using OlivierPaquien.Pulumi.Freebox;
 
 var pf = new PortForwarding("ssh", new PortForwardingArgs
 {

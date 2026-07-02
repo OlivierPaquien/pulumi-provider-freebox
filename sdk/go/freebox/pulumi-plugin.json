@@ -1,0 +1,6 @@
+{
+  "resource": true,
+  "name": "freebox",
+  "version": "0.3.4",
+  "server": "github://api.github.com/OlivierPaquien/pulumi-provider-freebox"
+}

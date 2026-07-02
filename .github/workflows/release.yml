@@ -125,6 +125,16 @@ jobs:
           name: sdk-go
           path: sdk/go/
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-nodejs
+          path: sdk/nodejs/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-dotnet
+          path: sdk/dotnet/
+
   github-release:
     needs: build-provider
     runs-on: ubuntu-latest

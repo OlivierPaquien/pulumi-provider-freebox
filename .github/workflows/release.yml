@@ -98,6 +98,16 @@ jobs:
           pulumi package gen-sdk schema.json --language python --version "$VERSION"
           pulumi package gen-sdk schema.json --language go --version "$VERSION"
 
+          # Make sdk/go a standalone Go module so `go get .../sdk/go@...` works.
+          printf '%s\n' \
+            'module github.com/OlivierPaquien/pulumi-provider-freebox/sdk/go' \
+            '' \
+            'go 1.24' \
+            '' \
+            'require github.com/pulumi/pulumi/sdk/v3 v3.217.0' \
+            > sdk/go/go.mod
+          (cd sdk/go && go mod tidy)
+
       - uses: actions/upload-artifact@v4
         with:
           name: schema
@@ -183,4 +193,4 @@ jobs:
           source: sdk/go
           path: sdk/go
           version: ${{ steps.version.outputs.version }}
-          additive: "true"
+          additive: "false"

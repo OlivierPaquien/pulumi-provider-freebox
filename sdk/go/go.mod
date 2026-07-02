@@ -1,0 +1,6 @@
+module github.com/OlivierPaquien/pulumi-provider-freebox/sdk/go
+
+go 1.24
+
+require github.com/pulumi/pulumi/sdk/v3 v3.217.0
+

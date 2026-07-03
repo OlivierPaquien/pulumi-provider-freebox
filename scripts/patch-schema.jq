@@ -1,5 +1,6 @@
 # Patch provider schema before SDK generation and Registry publication.
-del(.version)
+# Pass the release version: jq --arg version "$VERSION" -f scripts/patch-schema.jq
+.version = $version
 | .pluginDownloadURL = "github://api.github.com/OlivierPaquien/pulumi-freebox"
 | .publisher = "OlivierPaquien"
 | .logoUrl = "https://raw.githubusercontent.com/OlivierPaquien/pulumi-freebox/main/docs/logo.svg"

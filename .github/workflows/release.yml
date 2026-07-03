@@ -5,7 +5,8 @@
 #   - pypi  : PyPI trusted publisher for this workflow
 #   - nuget : NUGET_USER repository secret (OIDC login)
 #
-# Before tagging, align main.go `version` with the release (or rely on -ldflags below).
+# After tagging main, this workflow syncs schema.json and main.go version onto main
+# and updates the release tag so the registry can fetch schema.json at vX.Y.Z.
 
 name: Release
 
@@ -93,7 +94,7 @@ jobs:
           rm -f bin/*.tar.gz
           chmod +x bin/${{ env.PROVIDER }}
           pulumi package get-schema ./bin/${{ env.PROVIDER }} \
-            | jq -f scripts/patch-schema.jq \
+            | jq --arg version "$VERSION" -f scripts/patch-schema.jq \
             > schema.json
           pulumi package gen-sdk schema.json --language python --version "$VERSION"
           pulumi package gen-sdk schema.json --language go --version "$VERSION"
@@ -135,8 +136,44 @@ jobs:
           name: sdk-dotnet
           path: sdk/dotnet/
 
+  sync-release-metadata:
+    needs: generate-sdks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: schema
+          path: .
+
+      - name: Sync schema.json and main.go version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          chmod +x scripts/version.sh
+          ./scripts/version.sh write "$VERSION"
+
+      - name: Commit and update release tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add schema.json main.go
+          if git diff --staged --quiet; then
+            echo "schema.json and main.go already up to date"
+            exit 0
+          fi
+          git commit -m "chore(release): sync schema.json and version for ${GITHUB_REF_NAME}"
+          git tag -fa "${GITHUB_REF_NAME}" -m "Release ${GITHUB_REF_NAME}"
+          git push origin HEAD:refs/heads/main
+          git push origin "${GITHUB_REF_NAME}" --force
+
   github-release:
-    needs: build-provider
+    needs: [build-provider, generate-sdks]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -147,9 +184,16 @@ jobs:
         with:
           path: artifacts/
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: schema
+          path: release-assets/
+
       - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.tar.gz
+          files: |
+            artifacts/**/*.tar.gz
+            release-assets/schema.json
           generate_release_notes: true
 
   publish-python:
@@ -239,7 +283,7 @@ jobs:
             --source https://api.nuget.org/v3/index.json
 
   publish-go:
-    needs: generate-sdks
+    needs: [generate-sdks, sync-release-metadata]
     runs-on: ubuntu-latest
     permissions:
       contents: write

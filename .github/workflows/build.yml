@@ -30,7 +30,8 @@ jobs:
 
       - name: Generate schema from binary
         run: |
-          chmod +x bin/pulumi-resource-freebox
+          chmod +x bin/pulumi-resource-freebox scripts/version.sh
+          VERSION="$(./scripts/version.sh read)"
           pulumi package get-schema ./bin/pulumi-resource-freebox \
-            | jq -f scripts/patch-schema.jq \
-            | jq -e '.name == "freebox" and .pluginDownloadURL != null' >/dev/null
+            | jq --arg version "$VERSION" -f scripts/patch-schema.jq \
+            | jq -e '.name == "freebox" and .pluginDownloadURL != null and .version == "'"$VERSION"'"' >/dev/null

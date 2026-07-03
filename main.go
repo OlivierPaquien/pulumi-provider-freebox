@@ -10,7 +10,7 @@ import (
 )
 
 // Overridden at release build time via -ldflags "-X main.version=…".
-var version = "0.3.1"
+var version = "0.3.11"
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "authorize" {

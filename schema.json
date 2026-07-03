@@ -1,10 +1,12 @@
 {
   "name": "freebox",
   "displayName": "Freebox",
+  "version": "0.3.11",
   "description": "A Pulumi provider for Freebox (port forwarding, VMs, VPN, LAN, DHCP, virtual disks, remote files).",
   "language": {
     "csharp": {
-      "respectSchemaVersion": true
+      "respectSchemaVersion": true,
+      "rootNamespace": "OlivierPaquien.Pulumi"
     },
     "go": {
       "generateResourceContainerTypes": true,
@@ -1438,5 +1440,5 @@
   },
   "pluginDownloadURL": "github://api.github.com/OlivierPaquien/pulumi-freebox",
   "publisher": "OlivierPaquien",
-  "version": "0.3.1"
+  "logoUrl": "https://raw.githubusercontent.com/OlivierPaquien/pulumi-freebox/main/docs/logo.png"
 }

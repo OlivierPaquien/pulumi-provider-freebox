@@ -10,19 +10,17 @@ This provider is distributed as a **plugin binary** (`pulumi-resource-freebox`),
 
 A **language SDK** (npm, PyPI, NuGet, Go module) is a separate generated package that gives you typed APIs in TypeScript, Python, C#, or Go. It is **not** the same thing as the plugin binary.
 
-| Runtime | What you need today |
-|---------|---------------------|
+| Runtime | What you need |
+|---------|---------------|
 | **YAML** | Plugin binary only |
-| **TypeScript / Python / C# / Go** | Plugin binary **+** a generated SDK (see below) |
-
-Until SDKs are published to npm, PyPI, NuGet, and as a tagged Go module, commands like `npm install @pulumi/freebox` or `pip install pulumi-freebox` **will not work** — those packages do not exist yet.
+| **TypeScript / Python / C# / Go** | Plugin binary **+** language SDK |
 
 ## Plugin installation
 
 Install the plugin from a [GitHub release](https://github.com/OlivierPaquien/pulumi-freebox/releases) or from a local build:
 
 ```bash
-# From GitHub Releases (once published)
+# From GitHub Releases
 VERSION="$(gh release view --repo OlivierPaquien/pulumi-freebox --json tagName -q .tagName)"
 VERSION="${VERSION#v}"
 pulumi plugin install resource freebox "$VERSION" \
@@ -35,7 +33,9 @@ go build -o bin/pulumi-resource-freebox .
 pulumi plugin install resource freebox "$VERSION" --file ./bin/pulumi-resource-freebox
 ```
 
-## Language SDKs (today)
+Pulumi installs the matching plugin automatically when you add a published language SDK to your project.
+
+## Language SDKs
 
 ### YAML
 
@@ -43,7 +43,20 @@ No SDK required. Install the plugin, then use resource tokens directly (for exam
 
 ### TypeScript, Python, C#, Go
 
-Generate a local SDK from the provider schema inside your Pulumi project:
+Install the SDK for your language from the public package registries:
+
+| Language | Command |
+|----------|---------|
+| Node.js (TypeScript/JavaScript) | `npm install pulumi-freebox` |
+| Python | `pip install pulumi-freebox` |
+| .NET | `dotnet add package OlivierPaquien.Pulumi.Freebox` |
+| Go | `go get github.com/OlivierPaquien/pulumi-freebox/sdk/go@sdk/go/vVERSION` |
+
+Replace `VERSION` with a [release](https://github.com/OlivierPaquien/pulumi-freebox/releases) version (for example `sdk/go/v0.3.9`).
+
+### Local SDK generation (alternative)
+
+If you need an unreleased version or want SDK sources inside your project:
 
 ```bash
 VERSION="$(gh release view --repo OlivierPaquien/pulumi-freebox --json tagName -q .tagName)"
@@ -63,19 +76,6 @@ Alternatively, generate an SDK directory from `schema.json`:
 ```bash
 pulumi package gen-sdk ./schema.json --language <nodejs|python|csharp|go>
 ```
-
-## Language SDKs (after Registry publication)
-
-Once the provider is fully published, install commands will look like this:
-
-| Language | Command (after first release) |
-|----------|-------------------------------|
-| Node.js (TypeScript/JavaScript) | `npm install pulumi-freebox` |
-| Python | `pip install pulumi-freebox` |
-| .NET | `dotnet add package OlivierPaquien.Pulumi.Freebox` |
-| Go | `go get github.com/OlivierPaquien/pulumi-freebox/sdk/go/freebox@VERSION` |
-
-These commands only work after the corresponding packages are published as part of the release process. Until then, use the plugin binary plus local SDK generation above.
 
 ## Freebox API authorization
 
@@ -135,7 +135,7 @@ After rebuilding the plugin locally, reinstall it so Pulumi uses the new binary:
 ```bash
 VERSION="$(gh release view --repo OlivierPaquien/pulumi-freebox --json tagName -q .tagName)"
 VERSION="${VERSION#v}"
-pulumi plugin install resource freebox $VERSION --file ./bin/pulumi-resource-freebox --reinstall
+pulumi plugin install resource freebox "$VERSION" --file ./bin/pulumi-resource-freebox --reinstall
 FREEBOX_DEBUG_LOG=$HOME/freebox-provider.log pulumi up
 ```
 
